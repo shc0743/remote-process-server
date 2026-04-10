@@ -1,0 +1,1 @@
+clang++ -std=c++17 server.cpp && mv a.out rmpsm_server.$(python3 ./sys_name.py)
