@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <poll.h>
 #include <signal.h>
@@ -16,10 +18,14 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
-
 static constexpr uint64_t MAGIC   = 0x961f132bdddc19b9ULL;
-static constexpr uint64_t VERSION  = 1;
+static constexpr uint64_t VERSION  = 2;
 static constexpr uint64_t MAX_LEN  = (1ULL << 30); // 1 GiB 上限，防止恶意长度撑爆内存
+
+static constexpr uint64_t TYPE_ACK_ONLY = 18446744073709551615ULL;      // 纯 ACK，不再要求 ACK
+static constexpr size_t   MAX_APP_PAYLOAD = 32768;
+static constexpr size_t MAX_RELIABLE_QUEUE = 256;
+static constexpr auto     RETRANSMIT_TIMEOUT = std::chrono::milliseconds(500);
 
 static void close_fd(int& fd) {
     if (fd >= 0) {
@@ -47,74 +53,6 @@ static void write_u64_le(uint8_t* p, uint64_t v) {
     for (int i = 0; i < 8; ++i) {
         p[i] = (uint8_t)((v >> (i * 8)) & 0xFF);
     }
-}
-
-static bool write_all(int fd, const void* data, size_t len) {
-    const uint8_t* p = static_cast<const uint8_t*>(data);
-    size_t off = 0;
-    while (off < len) {
-        ssize_t n = write(fd, p + off, len - off);
-        if (n > 0) {
-            off += (size_t)n;
-            continue;
-        }
-        if (n < 0 && errno == EINTR) continue;
-        return false;
-    }
-    return true;
-}
-
-static bool send_packet(uint64_t type, uint64_t requestId, uint64_t taskId,
-                        const void* payload, uint64_t len) {
-    uint8_t header[48];
-    write_u64_le(header + 0, MAGIC);
-    write_u64_le(header + 8, VERSION);
-    write_u64_le(header + 16, type);
-    write_u64_le(header + 24, requestId);
-    write_u64_le(header + 32, taskId);
-    write_u64_le(header + 40, len);
-
-    if (!write_all(STDOUT_FILENO, header, sizeof(header))) {
-        return false;
-    }
-    if (len > 0) {
-        if (!write_all(STDOUT_FILENO, payload, (size_t)len)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static bool send_reply_empty(uint64_t requestId, uint64_t taskId) {
-    return send_packet(0, requestId, taskId, nullptr, 0);
-}
-
-static bool send_reply_errno(uint64_t requestId, uint64_t taskId, uint64_t err) {
-    uint8_t payload[8];
-    write_u64_le(payload, err);
-    return send_packet(0, requestId, taskId, payload, 8);
-}
-
-static bool send_reply_u64(uint64_t requestId, uint64_t taskId, uint64_t value) {
-    uint8_t payload[8];
-    write_u64_le(payload, value);
-    return send_packet(0, requestId, taskId, payload, 8);
-}
-
-static bool send_create_task_fail(uint64_t requestId, uint64_t err) {
-    uint8_t payload[16];
-    write_u64_le(payload + 0, 0);
-    write_u64_le(payload + 8, err);
-    return send_packet(0, requestId, 0, payload, 16);
-}
-
-static bool send_task_end(uint64_t taskId, uint8_t exitCode, uint8_t isSignalTerminated, uint8_t signalNo) {
-    uint8_t payload[3] = { exitCode, isSignalTerminated, signalNo };
-    return send_packet(4, 0, taskId, payload, 3);
-}
-
-static bool send_stdout_or_stderr(uint64_t type, uint64_t taskId, const uint8_t* data, size_t len) {
-    return send_packet(type, 0, taskId, data, (uint64_t)len);
 }
 
 static bool parse_command_line(const std::string& cmd, std::vector<std::string>& out, int& err) {
@@ -214,6 +152,35 @@ struct Task {
     bool stdin_close_requested = false;
 };
 
+struct TxItem {
+    std::vector<uint8_t> bytes;
+    size_t offset = 0;
+    bool reliable = false;
+    uint64_t seq = 0;
+};
+
+struct ReliablePacket {
+    uint64_t type = 0;
+    uint64_t requestId = 0;
+    uint64_t taskId = 0;
+    uint64_t seq = 0;
+    std::vector<uint8_t> payload;
+};
+
+struct ReliableState {
+    std::deque<ReliablePacket> waiting;
+
+    bool inflight_exists = false;
+    bool inflight_on_wire = false;
+    ReliablePacket inflight;
+    std::chrono::steady_clock::time_point inflight_last_wire{};
+    int retries = 0;
+};
+
+struct TransportState {
+    std::deque<TxItem> q;
+};
+
 static void compact_buffer(std::vector<uint8_t>& buf, size_t& pos) {
     if (pos == 0) return;
     if (pos > buf.size()) {
@@ -259,12 +226,141 @@ static bool flush_task_stdin(Task& t) {
     t.stdin_queue.clear();
     t.stdin_offset = 0;
 
-    // ⭐ 关键：真正关闭 stdin（发送 EOF）
+    // 真正关闭 stdin（发送 EOF）
     if (t.stdin_close_requested) {
         close_fd(t.stdin_fd);
         t.stdin_close_requested = false;
     }
 
+    return true;
+}
+
+static uint64_t next_seq_wrap(uint64_t v) {
+    if (v == UINT64_MAX) return 1;
+    if (v == 0) return 1;
+    return v + 1;
+}
+
+static std::vector<uint8_t> build_packet_bytes(
+    uint64_t type,
+    uint64_t requestId,
+    uint64_t taskId,
+    uint64_t seq,
+    uint64_t ack,
+    const uint8_t* payload,
+    size_t len
+) {
+    std::vector<uint8_t> out(72 + len);
+    write_u64_le(out.data() + 0, MAGIC);
+    write_u64_le(out.data() + 8, VERSION);
+    write_u64_le(out.data() + 16, type);
+    write_u64_le(out.data() + 24, (type == TYPE_ACK_ONLY) ? 0 : 1); // flags：预留
+    write_u64_le(out.data() + 32, requestId);
+    write_u64_le(out.data() + 40, taskId);
+    write_u64_le(out.data() + 48, seq);
+    write_u64_le(out.data() + 56, ack);
+    write_u64_le(out.data() + 64, (uint64_t)len);
+    if (len > 0) {
+        std::memcpy(out.data() + 72, payload, len);
+    }
+    return out;
+}
+
+static bool enqueue_tx_back(TransportState& tx, std::vector<uint8_t>&& bytes, bool reliable, uint64_t seq) {
+    tx.q.push_back(TxItem{std::move(bytes), 0, reliable, seq});
+    return true;
+}
+
+static bool enqueue_tx_front(TransportState& tx, std::vector<uint8_t>&& bytes, bool reliable, uint64_t seq) {
+    tx.q.push_front(TxItem{std::move(bytes), 0, reliable, seq});
+    return true;
+}
+
+static bool flush_transport(TransportState& tx, ReliableState& rel) {
+    while (!tx.q.empty()) {
+        TxItem& item = tx.q.front();
+        ssize_t n = write(STDOUT_FILENO, item.bytes.data() + item.offset, item.bytes.size() - item.offset);
+        if (n > 0) {
+            item.offset += (size_t)n;
+            if (item.offset == item.bytes.size()) {
+                if (item.reliable && rel.inflight_exists && !rel.inflight_on_wire && item.seq == rel.inflight.seq) {
+                    rel.inflight_on_wire = true;
+                    rel.inflight_last_wire = std::chrono::steady_clock::now();
+                }
+                tx.q.pop_front();
+            }
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return true;
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool process_peer_ack(ReliableState& rel, uint64_t ack) {
+    if (!rel.inflight_exists) return false;
+    if (ack == rel.inflight.seq) {
+        rel.inflight_exists = false;
+        rel.inflight_on_wire = false;
+        rel.retries = 0;
+        rel.inflight = ReliablePacket{};
+        return true;
+    }
+    return false;
+}
+
+static bool start_next_reliable_if_idle(ReliableState& rel,
+                                        TransportState& tx,
+                                        uint64_t peer_last_delivered_seq) {
+    if (rel.inflight_exists || rel.waiting.empty()) return false;
+
+    rel.inflight = std::move(rel.waiting.front());
+    rel.waiting.pop_front();
+
+    auto bytes = build_packet_bytes(
+        rel.inflight.type,
+        rel.inflight.requestId,
+        rel.inflight.taskId,
+        rel.inflight.seq,
+        peer_last_delivered_seq,
+        rel.inflight.payload.empty() ? nullptr : rel.inflight.payload.data(),
+        rel.inflight.payload.size()
+    );
+
+    enqueue_tx_back(tx, std::move(bytes), true, rel.inflight.seq);
+    rel.inflight_exists = true;
+    rel.inflight_on_wire = false;
+    rel.retries = 0;
+    return true;
+}
+
+static bool maybe_retransmit(ReliableState& rel,
+                             TransportState& tx,
+                             uint64_t peer_last_delivered_seq) {
+    if (!rel.inflight_exists || !rel.inflight_on_wire) return false;
+
+    auto now = std::chrono::steady_clock::now();
+    if (now - rel.inflight_last_wire < RETRANSMIT_TIMEOUT) {
+        return false;
+    }
+
+    auto bytes = build_packet_bytes(
+        rel.inflight.type,
+        rel.inflight.requestId,
+        rel.inflight.taskId,
+        rel.inflight.seq,
+        peer_last_delivered_seq,
+        rel.inflight.payload.empty() ? nullptr : rel.inflight.payload.data(),
+        rel.inflight.payload.size()
+    );
+
+    // 重传优先级高，放到最前面
+    enqueue_tx_front(tx, std::move(bytes), true, rel.inflight.seq);
+    rel.inflight_on_wire = false;
+    ++rel.retries;
     return true;
 }
 
@@ -356,6 +452,7 @@ static bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
     outTask.task_end_sent = false;
     outTask.stdin_queue.clear();
     outTask.stdin_offset = 0;
+    outTask.stdin_close_requested = false;
 
     return true;
 }
@@ -384,47 +481,20 @@ static bool encode_exit_info(const Task& t, uint8_t& exitCode, uint8_t& isSig, u
     return false;
 }
 
-static void drain_task_pipe(Task& t, int& fd, uint64_t outType) {
-    if (fd < 0) return;
-
-    while (true) {
-        uint8_t buf[4096];
-        ssize_t n = read(fd, buf, sizeof(buf));
-        if (n > 0) {
-            if (!send_stdout_or_stderr(outType, t.taskId, buf, (size_t)n)) {
-                _exit(1);
-            }
-            continue;
-        }
-        if (n == 0) {
-            close_fd(fd);
-            return;
-        }
-        if (errno == EINTR) continue;
-        if (errno == EAGAIN || errno == EWOULDBLOCK) return;
-        close_fd(fd);
-        return;
-    }
-}
-
-static void drain_exited_tasks(std::unordered_map<uint64_t, Task>& tasks) {
-    for (auto& kv : tasks) {
-        Task& t = kv.second;
-        if (!t.child_exited) continue;
-
-        drain_task_pipe(t, t.stdout_fd, 6);
-        drain_task_pipe(t, t.stderr_fd, 7);
-    }
-}
-
 int main() {
     signal(SIGPIPE, SIG_IGN);
     set_nonblock(STDIN_FILENO);
+    set_nonblock(STDOUT_FILENO);
 
     std::unordered_map<uint64_t, Task> tasks;
     std::unordered_map<pid_t, uint64_t> pid_to_task;
 
     uint64_t nextTaskId = 1;
+    uint64_t nextTxSeq = 1;
+
+    uint64_t peer_expected_seq = 1;
+    uint64_t peer_last_delivered_seq = 0;
+
     bool stdin_eof = false;
     bool stopping = false;
 
@@ -432,67 +502,68 @@ int main() {
     size_t rxpos = 0;
     std::vector<uint8_t> tmp(8192);
 
+    TransportState transport;
+    ReliableState reliable;
+
     auto send_protocol_error_and_exit = [&]() -> void {
         _exit(1);
     };
 
-    auto get_task_by_id = [&](uint64_t id) -> Task* {
-        auto it = tasks.find(id);
-        if (it == tasks.end()) return nullptr;
-        return &it->second;
+    auto queue_reliable_packet = [&](uint64_t type,
+                                     uint64_t requestId,
+                                     uint64_t taskId,
+                                     const uint8_t* payload,
+                                     size_t len) {
+        ReliablePacket pkt;
+        pkt.type = type;
+        pkt.requestId = requestId;
+        pkt.taskId = taskId;
+        pkt.seq = nextTxSeq;
+        nextTxSeq = next_seq_wrap(nextTxSeq);
+        if (len > 0 && payload != nullptr) {
+            pkt.payload.assign(payload, payload + len);
+        }
+        reliable.waiting.push_back(std::move(pkt));
     };
 
-    auto finalize_ready_tasks = [&]() -> void {
-        std::vector<uint64_t> to_erase;
-        to_erase.reserve(tasks.size());
-
-        for (auto& kv : tasks) {
-            Task& t = kv.second;
-            if (t.child_exited &&
-                t.stdout_fd < 0 &&
-                t.stderr_fd < 0 &&
-                !t.task_end_sent) {
-                uint8_t exitCode = 0, isSig = 0, sig = 0;
-                encode_exit_info(t, exitCode, isSig, sig);
-                if (!send_task_end(t.taskId, exitCode, isSig, sig)) {
-                    send_protocol_error_and_exit();
-                }
-                t.task_end_sent = true;
-                to_erase.push_back(t.taskId);
-            }
-        }
-
-        for (uint64_t id : to_erase) {
-            auto it = tasks.find(id);
-            if (it != tasks.end()) {
-                pid_to_task.erase(it->second.pid);
-                close_task_all_fds(it->second);
-                tasks.erase(it);
-            }
-        }
+    auto queue_reply_empty = [&](uint64_t requestId, uint64_t taskId) {
+        queue_reliable_packet(0, requestId, taskId, nullptr, 0);
     };
 
-    auto reap_children = [&]() -> void {
-        while (true) {
-            int status = 0;
-            pid_t pid = waitpid(-1, &status, WNOHANG);
-            if (pid > 0) {
-                auto mp = pid_to_task.find(pid);
-                if (mp != pid_to_task.end()) {
-                    auto it = tasks.find(mp->second);
-                    if (it != tasks.end()) {
-                        mark_task_exited(it->second, status);
-                        close_fd(it->second.stdin_fd);
-                        it->second.stdin_queue.clear();
-                        it->second.stdin_offset = 0;
-                    }
-                }
-                continue;
-            }
-            if (pid == 0) break;
-            if (pid < 0 && errno == EINTR) continue;
-            break;
-        }
+    auto queue_reply_errno = [&](uint64_t requestId, uint64_t taskId, uint64_t err) {
+        uint8_t payload[8];
+        write_u64_le(payload, err);
+        queue_reliable_packet(0, requestId, taskId, payload, 8);
+    };
+
+    auto queue_reply_u64 = [&](uint64_t requestId, uint64_t taskId, uint64_t value) {
+        uint8_t payload[8];
+        write_u64_le(payload, value);
+        queue_reliable_packet(0, requestId, taskId, payload, 8);
+    };
+
+    auto queue_create_task_fail = [&](uint64_t requestId, uint64_t err) {
+        uint8_t payload[16];
+        write_u64_le(payload + 0, 0);
+        write_u64_le(payload + 8, err);
+        queue_reliable_packet(0, requestId, 0, payload, 16);
+    };
+
+    auto queue_task_end = [&](uint64_t taskId, uint8_t exitCode, uint8_t isSignalTerminated, uint8_t signalNo) {
+        uint8_t payload[3] = { exitCode, isSignalTerminated, signalNo };
+        queue_reliable_packet(4, 0, taskId, payload, 3);
+    };
+
+    auto queue_ack_only = [&]() {
+        if (peer_last_delivered_seq == 0) return;
+        auto bytes = build_packet_bytes(TYPE_ACK_ONLY, 0, 0, 0, peer_last_delivered_seq, nullptr, 0);
+        // // ACK 包尽量优先发送；如果前面已经有“部分写入”的包，就不要插到前面破坏顺序
+        // if (!transport.q.empty() && transport.q.front().offset != 0) {
+            // enqueue_tx_back(transport, std::move(bytes), false, 0);
+        // } else {
+            // enqueue_tx_front(transport, std::move(bytes), false, 0);
+        // }
+        enqueue_tx_front(transport, std::move(bytes), false, 0);
     };
 
     auto handle_stop_server = [&](const std::vector<uint8_t>& payload) -> void {
@@ -516,9 +587,10 @@ int main() {
         }
     };
 
-    auto handle_create_task = [&](uint64_t requestId, const std::vector<uint8_t>& payload) -> void {
+    auto handle_create_task = [&](uint64_t requestId, const std::vector<uint8_t>& payload, bool& local_app_enqueued) -> void {
         if (stopping) {
-            if (!send_create_task_fail(requestId, ECANCELED)) send_protocol_error_and_exit();
+            queue_create_task_fail(requestId, ECANCELED);
+            local_app_enqueued = true;
             return;
         }
 
@@ -526,46 +598,52 @@ int main() {
 
         uint64_t assignedId = 0;
         if (nextTaskId == 0) {
-            if (!send_create_task_fail(requestId, EOVERFLOW)) send_protocol_error_and_exit();
+            queue_create_task_fail(requestId, EOVERFLOW);
+            local_app_enqueued = true;
             return;
         }
         assignedId = nextTaskId;
-        if (nextTaskId == UINT64_MAX) nextTaskId = 0;
+        if (nextTaskId == UINT64_MAX) nextTaskId = 1;
         else nextTaskId++;
 
         Task t;
         int err = 0;
         if (!spawn_task(cmdline, assignedId, t, err)) {
-            if (!send_create_task_fail(requestId, (uint64_t)err)) send_protocol_error_and_exit();
+            queue_create_task_fail(requestId, (uint64_t)err);
+            local_app_enqueued = true;
             return;
         }
 
         tasks.emplace(assignedId, std::move(t));
         pid_to_task[tasks[assignedId].pid] = assignedId;
 
-
-        if (!send_reply_u64(requestId, assignedId, assignedId)) {
-            send_protocol_error_and_exit();
-        }
+        queue_reply_u64(requestId, assignedId, assignedId);
+        local_app_enqueued = true;
     };
 
-    auto handle_kill_task = [&](uint64_t requestId, uint64_t headerTaskId, const std::vector<uint8_t>& payload) -> void {
+    auto handle_kill_task = [&](uint64_t requestId, uint64_t headerTaskId, const std::vector<uint8_t>& payload, bool& local_app_enqueued) -> void {
         uint64_t taskId = headerTaskId;
         if (taskId == 0) {
             if (!parse_payload_task_id(payload, taskId)) {
-                if (!send_reply_errno(requestId, 0, EINVAL)) send_protocol_error_and_exit();
+                queue_reply_errno(requestId, 0, EINVAL);
+                local_app_enqueued = true;
                 return;
             }
         }
 
-        Task* t = get_task_by_id(taskId);
+        Task* t = nullptr;
+        auto it = tasks.find(taskId);
+        if (it != tasks.end()) t = &it->second;
+
         if (!t || t->child_exited || t->pid <= 0) {
-            if (!send_reply_errno(requestId, taskId, ESRCH)) send_protocol_error_and_exit();
+            queue_reply_errno(requestId, taskId, ESRCH);
+            local_app_enqueued = true;
             return;
         }
 
         if (kill(t->pid, SIGKILL) == -1) {
-            if (!send_reply_errno(requestId, taskId, (uint64_t)errno)) send_protocol_error_and_exit();
+            queue_reply_errno(requestId, taskId, (uint64_t)errno);
+            local_app_enqueued = true;
             return;
         }
 
@@ -573,75 +651,211 @@ int main() {
         t->stdin_queue.clear();
         t->stdin_offset = 0;
 
-        if (!send_reply_empty(requestId, taskId)) {
-            send_protocol_error_and_exit();
-        }
+        queue_reply_empty(requestId, taskId);
+        local_app_enqueued = true;
     };
 
-    auto handle_input_data = [&](uint64_t requestId, uint64_t taskId, const std::vector<uint8_t>& payload) -> void {
-        Task* t = get_task_by_id(taskId);
+    auto handle_input_data = [&](uint64_t requestId, uint64_t taskId, const std::vector<uint8_t>& payload, bool& local_app_enqueued) -> void {
+        Task* t = nullptr;
+        auto it = tasks.find(taskId);
+        if (it != tasks.end()) t = &it->second;
+
         if (!t || t->child_exited || t->stdin_fd < 0) {
-            if (!send_reply_errno(requestId, taskId, ESRCH)) send_protocol_error_and_exit();
+            queue_reply_errno(requestId, taskId, ESRCH);
+            local_app_enqueued = true;
             return;
         }
-    
-        // ⭐ EOF：payload == 0
+
+        // EOF：payload 为空
         if (payload.empty()) {
             t->stdin_close_requested = true;
-    
+
             if (!flush_task_stdin(*t)) {
-                if (!send_reply_errno(requestId, taskId, (uint64_t)errno)) send_protocol_error_and_exit();
+                queue_reply_errno(requestId, taskId, (uint64_t)errno);
+                local_app_enqueued = true;
                 return;
             }
-    
-            if (!send_reply_empty(requestId, taskId)) send_protocol_error_and_exit();
+
+            queue_reply_empty(requestId, taskId);
+            local_app_enqueued = true;
             return;
         }
-    
+
         size_t oldSize = t->stdin_queue.size();
         t->stdin_queue.resize(oldSize + payload.size());
         std::memcpy(t->stdin_queue.data() + oldSize, payload.data(), payload.size());
-    
+
         if (!flush_task_stdin(*t)) {
-            if (!send_reply_errno(requestId, taskId, (uint64_t)errno)) send_protocol_error_and_exit();
+            queue_reply_errno(requestId, taskId, (uint64_t)errno);
+            local_app_enqueued = true;
             return;
         }
-    
-        if (!send_reply_empty(requestId, taskId)) send_protocol_error_and_exit();
+
+        queue_reply_empty(requestId, taskId);
+        local_app_enqueued = true;
     };
 
-    auto handle_query_version = [&](uint64_t requestId, uint64_t taskId) -> void {
-        static const char ver[] = "1.0.0";
-        if (!send_packet(0, requestId, taskId, ver, sizeof(ver) - 1)) {
-            send_protocol_error_and_exit();
+    auto handle_query_version = [&](uint64_t requestId, uint64_t taskId, bool& local_app_enqueued) -> void {
+        static const char ver[] = "2.0.0";
+        queue_reliable_packet(0, requestId, taskId, reinterpret_cast<const uint8_t*>(ver), sizeof(ver) - 1);
+        local_app_enqueued = true;
+    };
+
+    auto handle_unknown = [&](uint64_t requestId, uint64_t taskId, bool& local_app_enqueued) -> void {
+        queue_reply_errno(requestId, taskId, EINVAL);
+        local_app_enqueued = true;
+    };
+
+    auto drain_task_pipe_once = [&](Task& t, int& fd, uint64_t outType) -> bool {
+        if (fd < 0) return false;
+    
+        // 限流（防止爆队列）
+        if (reliable.waiting.size() >= MAX_RELIABLE_QUEUE || reliable.inflight_exists) {
+            return false;
+        }
+    
+        uint8_t buf[MAX_APP_PAYLOAD];
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n > 0) {
+            queue_reliable_packet(outType, 0, t.taskId, buf, (size_t)n);
+            return true;
+        }
+        if (n == 0) {
+            close_fd(fd);
+            return false;
+        }
+        if (errno == EINTR) return false;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return false;
+        close_fd(fd);
+        return false;
+    };
+
+    auto drain_exited_tasks_once = [&]() -> bool {
+        for (auto& kv : tasks) {
+            Task& t = kv.second;
+            if (!t.child_exited) continue;
+
+            if (t.stdout_fd >= 0) {
+                if (drain_task_pipe_once(t, t.stdout_fd, 6)) return true;
+            }
+            if (t.stderr_fd >= 0) {
+                if (drain_task_pipe_once(t, t.stderr_fd, 7)) return true;
+            }
+        }
+        return false;
+    };
+
+    auto finalize_ready_tasks = [&]() -> void {
+        std::vector<uint64_t> to_erase;
+        to_erase.reserve(tasks.size());
+
+        for (auto& kv : tasks) {
+            Task& t = kv.second;
+            if (t.child_exited &&
+                t.stdout_fd < 0 &&
+                t.stderr_fd < 0 &&
+                !t.task_end_sent) {
+                uint8_t exitCode = 0, isSig = 0, sig = 0;
+                encode_exit_info(t, exitCode, isSig, sig);
+                queue_task_end(t.taskId, exitCode, isSig, sig);
+                t.task_end_sent = true;
+                to_erase.push_back(t.taskId);
+            }
+        }
+
+        for (uint64_t id : to_erase) {
+            auto it = tasks.find(id);
+            if (it != tasks.end()) {
+                pid_to_task.erase(it->second.pid);
+                close_task_all_fds(it->second);
+                tasks.erase(it);
+            }
         }
     };
 
-    auto handle_unknown = [&](uint64_t requestId, uint64_t taskId) -> void {
-        if (!send_reply_errno(requestId, taskId, EINVAL)) {
+    auto progress_output_state = [&]() -> void {
+        if (!flush_transport(transport, reliable)) {
             send_protocol_error_and_exit();
+        }
+
+        if (maybe_retransmit(reliable, transport, peer_last_delivered_seq)) {
+            if (!flush_transport(transport, reliable)) {
+                send_protocol_error_and_exit();
+            }
+        }
+
+        if (start_next_reliable_if_idle(reliable, transport, peer_last_delivered_seq)) {
+            if (!flush_transport(transport, reliable)) {
+                send_protocol_error_and_exit();
+            }
         }
     };
 
     while (true) {
-        reap_children();
-        drain_exited_tasks(tasks);
+        progress_output_state();
+
+        reap_children:
+        {
+            while (true) {
+                int status = 0;
+                pid_t pid = waitpid(-1, &status, WNOHANG);
+                if (pid > 0) {
+                    auto mp = pid_to_task.find(pid);
+                    if (mp != pid_to_task.end()) {
+                        auto it = tasks.find(mp->second);
+                        if (it != tasks.end()) {
+                            mark_task_exited(it->second, status);
+                            close_fd(it->second.stdin_fd);
+                            it->second.stdin_queue.clear();
+                            it->second.stdin_offset = 0;
+                        }
+                    }
+                    continue;
+                }
+                if (pid == 0) break;
+                if (pid < 0 && errno == EINTR) continue;
+                break;
+            }
+        }
+
+        bool transport_busy = !transport.q.empty() || reliable.inflight_exists || !reliable.waiting.empty();
+        if (!transport_busy) {
+            // 只有在输出通道空闲时，才继续读取子进程 stdout/stderr，避免堆积太多可靠包
+            while (drain_exited_tasks_once()) {
+                progress_output_state();
+                transport_busy = !transport.q.empty() || reliable.inflight_exists || !reliable.waiting.empty();
+                if (transport_busy) break;
+            }
+        }
+
         finalize_ready_tasks();
 
-        if (stdin_eof && tasks.empty()) {
+        if (stdin_eof &&
+            tasks.empty() &&
+            transport.q.empty() &&
+            !reliable.inflight_exists &&
+            reliable.waiting.empty()) {
             break;
         }
 
         std::vector<pollfd> fds;
-        fds.reserve(1 + tasks.size() * 3);
+        fds.reserve(2 + tasks.size() * 3);
 
-        enum class Kind { Stdin, TaskStdout, TaskStderr, TaskStdin };
+        enum class Kind {
+            Stdin,
+            ServerTx,
+            TaskStdout,
+            TaskStderr,
+            TaskStdin
+        };
+
         struct Item {
             Kind kind;
             uint64_t taskId;
         };
+
         std::vector<Item> items;
-        items.reserve(1 + tasks.size() * 3);
+        items.reserve(2 + tasks.size() * 3);
 
         if (!stdin_eof) {
             pollfd p{};
@@ -651,25 +865,40 @@ int main() {
             items.push_back({Kind::Stdin, 0});
         }
 
+        if (!transport.q.empty()) {
+            pollfd p{};
+            p.fd = STDOUT_FILENO;
+            p.events = POLLOUT | POLLERR | POLLHUP;
+            fds.push_back(p);
+            items.push_back({Kind::ServerTx, 0});
+        }
+
+        bool allow_task_output_read = reliable.waiting.size() < MAX_RELIABLE_QUEUE / 2;
+
+        if (allow_task_output_read) {
+            for (auto& kv : tasks) {
+                Task& t = kv.second;
+
+                if (t.stdout_fd >= 0) {
+                    pollfd p{};
+                    p.fd = t.stdout_fd;
+                    p.events = POLLIN | POLLHUP | POLLERR;
+                    fds.push_back(p);
+                    items.push_back({Kind::TaskStdout, t.taskId});
+                }
+
+                if (t.stderr_fd >= 0) {
+                    pollfd p{};
+                    p.fd = t.stderr_fd;
+                    p.events = POLLIN | POLLHUP | POLLERR;
+                    fds.push_back(p);
+                    items.push_back({Kind::TaskStderr, t.taskId});
+                }
+            }
+        }
+
         for (auto& kv : tasks) {
             Task& t = kv.second;
-
-            if (t.stdout_fd >= 0) {
-                pollfd p{};
-                p.fd = t.stdout_fd;
-                p.events = POLLIN | POLLHUP | POLLERR;
-                fds.push_back(p);
-                items.push_back({Kind::TaskStdout, t.taskId});
-            }
-
-            if (t.stderr_fd >= 0) {
-                pollfd p{};
-                p.fd = t.stderr_fd;
-                p.events = POLLIN | POLLHUP | POLLERR;
-                fds.push_back(p);
-                items.push_back({Kind::TaskStderr, t.taskId});
-            }
-
             if (t.stdin_fd >= 0 && t.stdin_queue.size() > t.stdin_offset) {
                 pollfd p{};
                 p.fd = t.stdin_fd;
@@ -680,7 +909,6 @@ int main() {
         }
 
         if (fds.empty()) {
-            // 理论上只有 stdin_eof 且 tasks 为空 才会到这里
             break;
         }
 
@@ -689,6 +917,9 @@ int main() {
             if (errno == EINTR) continue;
             _exit(1);
         }
+
+        bool batch_ack_needed = false;
+        bool output_generation_blocked = !allow_task_output_read;
 
         for (size_t i = 0; i < fds.size(); ++i) {
             if (fds[i].revents == 0) continue;
@@ -705,7 +936,6 @@ int main() {
                     }
                     if (n == 0) {
                         stdin_eof = true;
-                        //close_fd(*const_cast<int*>(&STDIN_FILENO)); // 不会真的关闭常量；只是避免误用
                         break;
                     }
                     if (errno == EINTR) continue;
@@ -714,15 +944,19 @@ int main() {
                 }
 
                 while (true) {
-                    if (rxbuf.size() - rxpos < 48) break;
+                    if (rxbuf.size() - rxpos < 72) break;
 
                     const uint8_t* base = rxbuf.data() + rxpos;
                     uint64_t magic = read_u64_le(base + 0);
                     uint64_t version = read_u64_le(base + 8);
                     uint64_t type = read_u64_le(base + 16);
-                    uint64_t requestId = read_u64_le(base + 24);
-                    uint64_t taskId = read_u64_le(base + 32);
-                    uint64_t length = read_u64_le(base + 40);
+                    uint64_t flags = read_u64_le(base + 24);
+                    (void)flags;
+                    uint64_t requestId = read_u64_le(base + 32);
+                    uint64_t taskId = read_u64_le(base + 40);
+                    uint64_t seq = read_u64_le(base + 48);
+                    uint64_t ack = read_u64_le(base + 56);
+                    uint64_t length = read_u64_le(base + 64);
 
                     if (magic != MAGIC || version != VERSION) {
                         _exit(1);
@@ -730,82 +964,139 @@ int main() {
                     if (length > MAX_LEN || length > (uint64_t)std::numeric_limits<size_t>::max()) {
                         _exit(1);
                     }
-                    if (rxbuf.size() - rxpos < 48 + (size_t)length) break;
+                    if (rxbuf.size() - rxpos < 72 + (size_t)length) break;
 
                     std::vector<uint8_t> payload;
                     payload.resize((size_t)length);
                     if (length > 0) {
-                        std::memcpy(payload.data(), base + 48, (size_t)length);
+                        std::memcpy(payload.data(), base + 72, (size_t)length);
                     }
 
-                    rxpos += 48 + (size_t)length;
+                    rxpos += 72 + (size_t)length;
                     compact_buffer(rxbuf, rxpos);
 
-                    switch (type) {
-                        case 0:
-                            // reply：客户端发来的 reply 直接忽略
-                            break;
-
-                        case 1:
-                            handle_stop_server(payload);
-                            break;
-
-                        case 2:
-                            handle_create_task(requestId, payload);
-                            break;
-
-                        case 3:
-                            handle_kill_task(requestId, taskId, payload);
-                            break;
-
-                        case 5:
-                            handle_input_data(requestId, taskId, payload);
-                            break;
-
-                        case 255:
-                            handle_query_version(requestId, taskId);
-                            break;
-
-                        case 4:
-                        case 6:
-                        case 7:
-                            // 这些是服务器发送给客户端的消息，忽略客户端发来的同类包
-                            break;
-
-                        default:
-                            handle_unknown(requestId, taskId);
-                            break;
+                    if (type == TYPE_ACK_ONLY) {
+                        process_peer_ack(reliable, ack);
+                        if (start_next_reliable_if_idle(reliable, transport, peer_last_delivered_seq)) {
+                            progress_output_state();
+                        }
+                        continue;
                     }
 
-                    if (stopping) {
-                        // stopping 之后尽量不再接受新输入，继续让当前任务走向结束即可
-                        // 但仍然允许已有任务的 stdout/stderr 和 waitpid 处理继续进行
+                    bool local_app_enqueued = false;
+                    bool inflight_before = reliable.inflight_exists;
+
+                    // 先处理对端对我方包的 ACK（piggyback ACK）
+                    process_peer_ack(reliable, ack);
+
+                    bool accepted = false;
+                    bool is_new = false;
+                    
+                    if (seq == peer_expected_seq) {
+                        peer_expected_seq++;
+                        peer_last_delivered_seq = seq;
+                        accepted = true;
+                        is_new = true;   // ⭐ 新包
+                    } else if (seq < peer_expected_seq) {
+                        accepted = true;  // ⭐ 旧包（重传）
+                        is_new = false;
+                    } else {
+                        accepted = false;
+                    }
+
+                    if (accepted && is_new) {
+                        switch (type) {
+                            case 0:
+                                // reply：客户端发来的 reply 直接忽略
+                                break;
+
+                            case 1:
+                                handle_stop_server(payload);
+                                break;
+
+                            case 2:
+                                handle_create_task(requestId, payload, local_app_enqueued);
+                                break;
+
+                            case 3:
+                                handle_kill_task(requestId, taskId, payload, local_app_enqueued);
+                                break;
+
+                            case 5:
+                                handle_input_data(requestId, taskId, payload, local_app_enqueued);
+                                break;
+
+                            case 255:
+                                handle_query_version(requestId, taskId, local_app_enqueued);
+                                break;
+
+                            case 4:
+                            case 6:
+                            case 7:
+                                // 这些是服务器发送给客户端的消息，忽略客户端发来的同类包
+                                break;
+
+                            default:
+                                handle_unknown(requestId, taskId, local_app_enqueued);
+                                break;
+                        }
+                    }
+
+                    // 如果在这次处理里生成了新的可靠应用包，尽量马上开始发送
+                    if (local_app_enqueued) {
+                        if (start_next_reliable_if_idle(reliable, transport, peer_last_delivered_seq)) {
+                            progress_output_state();
+                        }
+                    }
+
+                    // // 只要收到的是有效应用包，就需要 ACK；如果当前已经有在飞的包，
+                    // // 或者这次没有生成可 piggyback 的新应用包，就发一个纯 ACK。
+                    // if (accepted && (inflight_before || !local_app_enqueued)) {
+                        // batch_ack_needed = true;
+                    // }
+                    if (accepted) {
+                        queue_ack_only();
+                        progress_output_state();  // ⭐ 立即 flush
+                    }
+                }
+            } else if (item.kind == Kind::ServerTx) {
+                if (!flush_transport(transport, reliable)) {
+                    _exit(1);
+                }
+                if (maybe_retransmit(reliable, transport, peer_last_delivered_seq)) {
+                    if (!flush_transport(transport, reliable)) {
+                        _exit(1);
+                    }
+                }
+                if (start_next_reliable_if_idle(reliable, transport, peer_last_delivered_seq)) {
+                    if (!flush_transport(transport, reliable)) {
+                        _exit(1);
                     }
                 }
             } else if (item.kind == Kind::TaskStdout || item.kind == Kind::TaskStderr) {
+                if (output_generation_blocked) {
+                    continue;
+                }
                 auto it = tasks.find(item.taskId);
                 if (it == tasks.end()) continue;
                 Task& t = it->second;
                 int* target_fd = (item.kind == Kind::TaskStdout) ? &t.stdout_fd : &t.stderr_fd;
                 uint64_t outType = (item.kind == Kind::TaskStdout) ? 6 : 7;
 
-                while (true) {
-                    uint8_t buf[4096];
-                    ssize_t n = read(*target_fd, buf, sizeof(buf));
-                    if (n > 0) {
-                        if (!send_stdout_or_stderr(outType, t.taskId, buf, (size_t)n)) {
-                            _exit(1);
-                        }
-                        continue;
-                    }
-                    if (n == 0) {
-                        close_fd(*target_fd);
-                        break;
-                    }
-                    if (errno == EINTR) continue;
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                uint8_t buf[MAX_APP_PAYLOAD];
+                ssize_t n = read(*target_fd, buf, sizeof(buf));
+                if (n > 0) {
+                    queue_reliable_packet(outType, 0, t.taskId, buf, (size_t)n);
+                    output_generation_blocked = true;
+                    progress_output_state();
+                } else if (n == 0) {
                     close_fd(*target_fd);
-                    break;
+                } else if (errno == EINTR) {
+                    // 忽略
+                } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // 忽略
+                } else {
+                    close_fd(*target_fd);
                 }
             } else if (item.kind == Kind::TaskStdin) {
                 auto it = tasks.find(item.taskId);
@@ -822,20 +1113,28 @@ int main() {
             }
         }
 
-        // 处理所有 task 的结束条件
+        // if (batch_ack_needed) {
+            // queue_ack_only();
+            // progress_output_state();
+        // }
+
         finalize_ready_tasks();
 
-        // 如果 stdin 已结束且没有任务，则退出
-        if (stdin_eof && tasks.empty()) {
+        if (stdin_eof &&
+            tasks.empty() &&
+            transport.q.empty() &&
+            !reliable.inflight_exists &&
+            reliable.waiting.empty()) {
             break;
         }
 
-        // 如果已经进入 stopping 且没有任务了，也退出
-        if (stopping && tasks.empty()) {
+        if (stopping && tasks.empty() &&
+            transport.q.empty() &&
+            !reliable.inflight_exists &&
+            reliable.waiting.empty()) {
             break;
         }
     }
 
     return 0;
 }
-
