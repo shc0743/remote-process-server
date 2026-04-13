@@ -1,2 +1,7 @@
 rmpsm_server.*
 dev-custom
+*.out
+*.o
+__pycache__
+node_modules
+.vs

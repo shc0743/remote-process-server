@@ -1,7 +1,10 @@
 {
   "name": "remote-process-server",
-  "version": "2.0.0",
-  "description": "",
+  "version": "3.0.0-alpha.1",
+  "description": "A robust client/server system for remotely creating and managing processes across FIFO-based communication channels",
+  "bin": {
+    "remote-process-server": "entry.js"
+  },
   "keywords": [
     "backend",
     "server",
@@ -22,9 +25,12 @@
   "files": [
     "README.md",
     "LICENSE",
+    ".gitignore",
+    "entry.js",
     "client.py",
     "server.cpp",
-    "compile.sh",
+    "server/**",
+    "compile.*",
     "sys_name.py",
     "rmpsm_server.*"
   ],
