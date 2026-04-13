@@ -27,7 +27,7 @@
     ".gitignore",
     "entry.js",
     "client.py",
-    "client/**/*",
+    "client/*.py",
     "server.cpp",
     "server/**/*",
     "compile.*",
