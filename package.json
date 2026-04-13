@@ -1,15 +1,14 @@
 {
   "name": "remote-process-server",
-  "version": "3.0.0-alpha.1",
-  "description": "A robust client/server system for remotely creating and managing processes across FIFO-based communication channels",
+  "version": "3.0.0-alpha.2",
+  "description": "A client/server system for remotely creating and managing processes",
   "bin": {
     "remote-process-server": "entry.js"
   },
   "keywords": [
     "backend",
     "server",
-    "process",
-    "remote"
+    "process"
   ],
   "homepage": "https://github.com/shc0743/remote-process-server#readme",
   "bugs": {
@@ -28,8 +27,9 @@
     ".gitignore",
     "entry.js",
     "client.py",
+    "client/**/*",
     "server.cpp",
-    "server/**",
+    "server/**/*",
     "compile.*",
     "sys_name.py",
     "rmpsm_server.*"
