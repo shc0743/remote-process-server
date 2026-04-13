@@ -1,9 +1,5 @@
 ﻿#include "server/server.hpp"
-#ifdef _WIN32
-#include "platform_win32.hpp"
-#else
-#include "server/platform_posix.hpp"
-#endif
+#include "server/platform.hpp"
 
 int main() {
     return rmpsm::run_server();

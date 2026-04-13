@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const CLIENT_PY = join(__dirname, 'client.py');
+const CLIENT_PY = join(join(__dirname, 'client'), 'client.py');
 
 function runPythonClient(args) {
     const child = spawn('python', [CLIENT_PY, ...args], { stdio: 'inherit' });
