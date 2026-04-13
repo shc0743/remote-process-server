@@ -21,6 +21,7 @@ switch (action) {
         break;
 
     case 'serve':
+        process.chdir(__dirname);
         runPythonClient(['--type=manager', ...restArgs]);
         break;
 
