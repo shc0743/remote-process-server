@@ -1,0 +1,64 @@
+name: Publish Package to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: "npm"
+
+      - name: Prepare release files
+        id: prep
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          BUILD_WORKFLOW_FILE: build-server.yml
+          ARTIFACT_DIR: ./server-artifacts
+        run: |
+          chmod +x ./.scripts/prepare-publish.sh
+          ./.scripts/prepare-publish.sh
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test --if-present
+
+      - name: Build JS wrapper
+        run: npm run build --if-present
+
+      - name: Publish to npm with provenance
+        shell: bash
+        env:
+          NPM_DIST_TAG: ${{ steps.prep.outputs.npm_dist_tag }}
+        run: |
+          if [ "$NPM_DIST_TAG" = "latest" ]; then
+            npm publish
+          else
+            npm publish --tag "$NPM_DIST_TAG"
+          fi
