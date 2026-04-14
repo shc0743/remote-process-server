@@ -48,9 +48,6 @@ jobs:
           - arch: aarch64
             target: aarch64-linux-android
             api: 21
-          - arch: armv7l
-            target: armv7a-linux-androideabi
-            api: 21
 
     steps:
       - name: Checkout code
