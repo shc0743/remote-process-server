@@ -243,64 +243,89 @@ class ClientRuntime:
         if not os.path.exists(self.connection_file):
             raise FileNotFoundError(f"Manager connection file not found: {self.connection_file}")
 
-        address, authkey = read_connection_info(self.connection_file)
+        startup_deadline = time.monotonic() + 180.0
+        last_error: Optional[BaseException] = None
 
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        sock.connect(address)
-        self._socket = sock
-        self._reader = ControlFrameReader(sock)
-
-        self._send_frame(C2M_AUTH, authkey)
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
+        while time.monotonic() < startup_deadline and not self.stop_event.is_set():
+            sock: Optional[socket.socket] = None
             try:
-                frame = self._reader.read_frame()
-            except socket.timeout:
-                continue
-            if frame is None:
-                raise RuntimeError("manager closed during auth")
-            msg_type, _flags, payload = frame
-            if msg_type == M2C_AUTH_OK:
-                break
-            if msg_type == M2C_AUTH_FAIL:
-                raise RuntimeError("authentication failed")
-        else:
-            raise TimeoutError("manager authentication timed out")
+                address, authkey = read_connection_info(self.connection_file)
 
-        req_id = self._next_req_id()
-        self._send_frame(C2M_CREATE_SESSION, pack_create_session_request(req_id))
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2.0)
+                sock.connect(address)
 
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            try:
-                frame = self._reader.read_frame()
-            except socket.timeout:
-                continue
-            if frame is None:
-                raise RuntimeError("manager closed during session creation")
-            msg_type, _flags, payload = frame
-            if msg_type != M2C_CREATE_SESSION_RESP:
-                continue
+                self._socket = sock
+                self._reader = ControlFrameReader(sock)
 
-            try:
-                resp_req_id, ok, err, session_id, message = decode_create_session_resp(payload)
-            except Exception:
-                raise RuntimeError("invalid create_session response")
+                self._send_frame(C2M_AUTH, authkey)
+                auth_deadline = time.monotonic() + 120.0
+                while time.monotonic() < auth_deadline:
+                    try:
+                        frame = self._reader.read_frame()
+                    except socket.timeout:
+                        continue
+                    if frame is None:
+                        raise RuntimeError("manager closed during auth")
+                    msg_type, _flags, payload = frame
+                    if msg_type == M2C_AUTH_OK:
+                        break
+                    if msg_type == M2C_AUTH_FAIL:
+                        raise RuntimeError("authentication failed")
+                else:
+                    raise TimeoutError("manager authentication timed out")
 
-            if resp_req_id != req_id:
-                continue
+                req_id = self._next_req_id()
+                self._send_frame(C2M_CREATE_SESSION, pack_create_session_request(req_id))
 
-            if not ok:
-                raise RuntimeError(f"manager open failed: {message or 'unknown'} ({err})")
+                session_deadline = time.monotonic() + 120.0
+                while time.monotonic() < session_deadline:
+                    try:
+                        frame = self._reader.read_frame()
+                    except socket.timeout:
+                        continue
+                    if frame is None:
+                        raise RuntimeError("manager closed during session creation")
+                    msg_type, _flags, payload = frame
+                    if msg_type != M2C_CREATE_SESSION_RESP:
+                        continue
 
-            self._session_id = session_id
-            break
-        else:
-            raise TimeoutError("manager did not respond to create_session")
+                    try:
+                        resp_req_id, ok, err, session_id, message = decode_create_session_resp(payload)
+                    except Exception:
+                        raise RuntimeError("invalid create_session response")
 
-        self._reader_thread = threading.Thread(target=self._socket_reader_loop, daemon=False)
-        self._reader_thread.start()
+                    if resp_req_id != req_id:
+                        continue
+
+                    if not ok:
+                        raise RuntimeError(f"manager open failed: {message or 'unknown'} ({err})")
+
+                    self._session_id = session_id
+                    break
+                else:
+                    raise TimeoutError("manager did not respond to create_session")
+
+                self._reader_thread = threading.Thread(target=self._socket_reader_loop, daemon=False)
+                self._reader_thread.start()
+                return
+
+            except Exception as e:
+                last_error = e
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+                self._socket = None
+                self._reader = None
+
+                if isinstance(e, RuntimeError) and "authentication failed" in str(e):
+                    raise
+
+                time.sleep(0.5)
+
+        raise TimeoutError("manager startup timed out") from last_error
 
     def _socket_reader_loop(self) -> None:
         if self._reader is None:

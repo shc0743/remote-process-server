@@ -55,6 +55,7 @@ class ServerBridge:
 
         if self.proc.stdin is None or self.proc.stdout is None:
             raise RuntimeError("failed to start server process")
+        print('Server process started, waiting for connection...', file=sys.stderr)
 
         self.stdin_fd = self.proc.stdin.fileno()
         self.stdout_fd = self.proc.stdout.fileno()
@@ -141,8 +142,8 @@ class ServerBridge:
         payload: bytes,
         *,
         require_ack: bool = True,
-        timeout: float = 0.5,
-        max_retries: int = 20,
+        timeout: float = 1.5,
+        max_retries: int = 60,
     ) -> int:
         with self._state_lock:
             seq = self._alloc_seq_locked()
@@ -190,9 +191,17 @@ class ServerBridge:
         self._version_event.clear()
         self._version_value = None
 
-        self._send_packet(255, self._version_req_id, 0, b"", require_ack=True)
+        self._send_packet(
+            255,
+            self._version_req_id,
+            0,
+            b"",
+            require_ack=True,
+            timeout=2.0,
+            max_retries=120,
+        )
 
-        if not self._version_event.wait(5.0):
+        if not self._version_event.wait(120.0):
             raise TimeoutError("server version check timed out")
 
         if self._version_value != PROTOCOL_VERSION_TEXT:
@@ -200,7 +209,7 @@ class ServerBridge:
                 f"protocol version mismatch: server={self._version_value!r}, client={PROTOCOL_VERSION_TEXT!r}"
             )
 
-    def create_task(self, session_id: str, cmdline: str, timeout: float = 60.0) -> Tuple[bool, int, int]:
+    def create_task(self, session_id: str, cmdline: str, timeout: float = 180.0) -> Tuple[bool, int, int]:
         req_id = self._next_req_id()
         waiter = PendingCreateTask(session_id=session_id)
         self._pending[req_id] = waiter
