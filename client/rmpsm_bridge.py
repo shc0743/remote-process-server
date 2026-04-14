@@ -25,7 +25,7 @@ class PendingCreateTask:
 
 
 class ServerBridge:
-    def __init__(self, manager: "Manager", server_path: str):
+    def __init__(self, manager: "Manager", server_path: str, stderr: str = "inherit"):
         self.manager = manager
         self.server_path = server_path
 
@@ -33,12 +33,22 @@ class ServerBridge:
         if not args:
             raise FileNotFoundError("empty server path")
 
+        # Map stderr argument to subprocess constant
+        if stderr == "ignore":
+            stderr_handle = subprocess.DEVNULL
+        elif stderr == "merge":
+            stderr_handle = subprocess.STDOUT
+        elif stderr == "inherit":
+            stderr_handle = None
+        else:
+            raise ValueError(f"invalid stderr option: {stderr}")
+
         self.proc = subprocess.Popen(
             args,
             executable=args[0] if os.name == "nt" else None,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=stderr_handle,
             bufsize=0,
             shell=False,
         )

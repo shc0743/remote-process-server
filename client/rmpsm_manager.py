@@ -33,9 +33,10 @@ from rmpsm_transport import safe_unlink
 
 
 class Manager:
-    def __init__(self, connection_file: str, server_path: str):
+    def __init__(self, connection_file: str, server_path: str, stderr: str = "inherit"):
         self.connection_file = connection_file
         self.server_path = server_path
+        self.stderr = stderr
 
         self._base_dir = os.path.dirname(self.connection_file) or "."
         os.makedirs(self._base_dir, exist_ok=True)
@@ -45,7 +46,9 @@ class Manager:
         self._session_lock = threading.Lock()
         self._next_session_id = 1
 
-        self.bridge = ServerBridge(self, server_path)
+        self.bridge = ServerBridge(self, server_path, stderr)
+        
+        print('Server has been started', file=sys.stderr)
 
     def _new_session_id(self) -> str:
         with self._session_lock:
