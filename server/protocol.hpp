@@ -15,6 +15,12 @@
 #include "windows1.h"
 #endif
 
+#ifdef _WIN32
+using pid_t = DWORD;
+#else
+#include <sys/types.h>
+#endif
+
 namespace rmpsm {
 
 static constexpr uint64_t MAGIC = 0x961f132bdddc19b9ULL;

@@ -192,6 +192,10 @@ private:
             progress_output_state();  // ⭐ 立即 flush
         }
     }
+    
+    #ifdef _WIN32
+    friend void process_async_events(Server& server);
+    #endif
 };
 
 int run_server();

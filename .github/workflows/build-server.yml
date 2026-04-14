@@ -59,7 +59,7 @@ jobs:
       - name: Compile (${{ matrix.arch }})
         run: |
           $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.target }}${{ matrix.api }}-clang++ \
-            -std=c++17 \
+            -std=c++20 \
             -I. \
             -o rmpsm_server.android_${{ matrix.arch }} \
             server.cpp

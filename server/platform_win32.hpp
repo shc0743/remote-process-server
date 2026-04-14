@@ -26,11 +26,11 @@
 #include <utility>
 #include <vector>
 
-using pid_t = long;
-
 #include "server.hpp"
 
 namespace rmpsm {
+
+constexpr auto DWORD_MAX = std::numeric_limits<DWORD>::max;
 
 inline void close_fd(platform_handle_t& h) {
     if (h && h != INVALID_HANDLE_VALUE) {
@@ -61,7 +61,8 @@ inline void store_handle(T& dst, HANDLE h) {
     }
 }
 
-inline void reset_handle_field(auto& field) {
+template<typename T>
+inline void reset_handle_field(T& field) {
     if constexpr (std::is_pointer_v<std::decay_t<decltype(field)>>) {
         field = nullptr;
     } else {
@@ -275,8 +276,8 @@ inline void start_detached_reader_thread(std::shared_ptr<Win32TaskRuntime> tr, H
     }).detach();
 }
 
-inline void start_detached_process_watch_thread(TaskRuntime* tr) {
-    std::thread([tr]() {
+inline void start_detached_process_watch_thread(std::shared_ptr<Win32TaskRuntime> tr) {
+    std::thread([tr = std::move(tr)]() {
         WaitForSingleObject(tr->process, INFINITE);
 
         DWORD code = 0;
@@ -284,15 +285,11 @@ inline void start_detached_process_watch_thread(TaskRuntime* tr) {
             code = 0;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(tr->mtx);
-
-            tr->task->child_exited = true;
-            tr->task->exited_normally = true;
-            tr->task->signaled = false;
-            tr->task->exit_code = static_cast<uint32_t>(code);
-            tr->task->signal_no = 0;
-        }
+        AsyncEvent ev;
+        ev.kind = AsyncEventKind::ChildExit;
+        ev.taskId = tr->taskId;
+        ev.exitCode = static_cast<uint32_t>(code);
+        push_event(std::move(ev));
 
         CloseHandle(tr->process);
     }).detach();
@@ -1033,8 +1030,6 @@ inline bool runtime_has_work() {
 }
 
 inline int Server::run() {
-    signal(SIGPIPE, SIG_IGN);
-
     // Windows 下不需要 set_nonblock，也不依赖 poll。
     start_stdin_reader_thread();
 
@@ -1069,20 +1064,6 @@ inline int Server::run() {
 inline int run_server() {
     Server s;
     return s.run();
-}
-
-inline bool encode_exit_info(const Task& t, uint32_t& exitCode, uint8_t& isSig, uint8_t& sig) {
-    if (!t.child_exited) {
-        exitCode = 0;
-        isSig = 0;
-        sig = 0;
-        return false;
-    }
-
-    exitCode = t.exit_code;
-    isSig = t.signaled ? 1 : 0;
-    sig = (uint8_t)t.signal_no;
-    return true;
 }
 
 } // namespace rmpsm
