@@ -3,7 +3,7 @@
 A robust client/server system for remotely creating and managing processes.  
 modern transport, cross‑platform aspirations, and a friendly CLI.
 
-v2 is stable but v3 is **currently alpha**. Documents may not complete.
+v2 is stable but v3 is **currently beta**. Documents may not complete.
 
 ## License
 
