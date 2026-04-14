@@ -23,13 +23,13 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-          cache: "npm"
+          package-manager-cache: false
 
-      - name: Prepare release files
+      - name: Prepare release metadata
         id: prep
         shell: bash
         env:
@@ -38,13 +38,30 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           BUILD_WORKFLOW_FILE: build-server.yml
-          ARTIFACT_DIR: ./server-artifacts
         run: |
           chmod +x ./.scripts/prepare-publish.sh
           ./.scripts/prepare-publish.sh
 
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.prep.outputs.build_run_id }}
+          path: ./server-artifacts
+          pattern: rmpsm_server.*
+          merge-multiple: true
+
+      - name: Restore server binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          find server-artifacts -type f -name 'rmpsm_server.*' -exec cp -f {} . \;
+          chmod +x rmpsm_server.* 2>/dev/null || true
+          ls -l rmpsm_server.* || true
+
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Test
         run: npm test --if-present
@@ -58,7 +75,7 @@ jobs:
           NPM_DIST_TAG: ${{ steps.prep.outputs.npm_dist_tag }}
         run: |
           if [ "$NPM_DIST_TAG" = "latest" ]; then
-            npm publish
+            npm publish --provenance
           else
-            npm publish --tag "$NPM_DIST_TAG"
+            npm publish --provenance --tag "$NPM_DIST_TAG"
           fi
