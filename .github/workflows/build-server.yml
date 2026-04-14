@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Compile
         shell: cmd
@@ -19,25 +19,25 @@ jobs:
           compile.cmd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: windows
+          archive: false
           path: rmpsm_server.*
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Compile
         run: |
           ./compile.sh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: linux
+          archive: false
           path: rmpsm_server.linux_*
 
   build-android:
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Compile (${{ matrix.arch }})
         run: |
@@ -65,7 +65,7 @@ jobs:
             server.cpp
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: android-${{ matrix.arch }}
+          archive: false
           path: rmpsm_server.android_${{ matrix.arch }}

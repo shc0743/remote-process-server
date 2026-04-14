@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 #ifdef _WIN32
-#include <Windows.h>
+#include "windows1.h"
 #endif
 
 namespace rmpsm {
@@ -24,7 +24,7 @@ static constexpr uint64_t MAX_LEN = (1ULL << 30); // 1 GiB 上限，防止恶意
 static constexpr uint64_t TYPE_ACK_ONLY = 18446744073709551615ULL; // 纯 ACK，不再要求 ACK
 static constexpr size_t MAX_APP_PAYLOAD = 32768;
 static constexpr size_t MAX_RELIABLE_QUEUE = 256;
-static constexpr auto RETRANSMIT_TIMEOUT = std::chrono::milliseconds(500);
+static constexpr auto RETRANSMIT_TIMEOUT = std::chrono::milliseconds(5000);
 
 #ifdef _WIN32
     using platform_handle_t = HANDLE;

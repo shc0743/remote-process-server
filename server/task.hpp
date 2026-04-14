@@ -2,8 +2,6 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <vector>
 
 namespace rmpsm {

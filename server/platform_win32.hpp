@@ -2,11 +2,7 @@
 
 #ifdef _WIN32
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#include <windows.h>
+#include "windows1.h"
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
@@ -1010,7 +1006,7 @@ inline void process_async_events(Server& server) {
                 if (it == server.tasks.end()) break;
                 Task& t = it->second;
 
-                mark_task_exited(t, static_cast<int>(ev.exitCode));
+                mark_task_exited(t, true, ev.exitCode, false, 0);
 
                 // 退出后不再接收 stdin
                 close_fd(t.stdin_fd);
