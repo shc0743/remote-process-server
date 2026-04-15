@@ -61,7 +61,7 @@ jobs:
           ls -l rmpsm_server.* || true
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci || npm i
 
       - name: Test
         run: npm test --if-present

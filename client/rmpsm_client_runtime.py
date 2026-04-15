@@ -433,7 +433,10 @@ def kill_manager(connection_file: str) -> int:
         req_id = 1
         sock.sendall(pack_frame(C2M_STOP_MANAGER, pack_stop_manager_request(req_id)))
         print("Kill request sent to manager.")
-        _ = reader.read_frame()
+        try:
+            _ = reader.read_frame()
+        except Exception:
+            pass
         return 0
     except Exception as e:
         print(f"Failed to send kill request: {e}", file=sys.stderr)

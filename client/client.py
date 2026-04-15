@@ -20,9 +20,10 @@ def main() -> int:
     parser.add_argument(
         "--server",
         default="./rmpsm_server." + str(platform.system().lower()) + "_" + str(platform.machine().lower()),
+        help="[Manager only] specify the server startup command"
     )
-    parser.add_argument("--kill", action="store_true", help="Kill the manager process (client only)")
-    parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="How to handle stderr: ignore, merge to stdout, or inherit")
+    parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")
+    parser.add_argument("--kill", action="store_true", help="[Client only] Kill the manager process")
     args, remainder = parser.parse_known_args()
 
     if remainder and remainder[0] == "--":

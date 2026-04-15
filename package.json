@@ -26,6 +26,7 @@
     "LICENSE",
     ".gitignore",
     "entry.js",
+    "test.js",
     "client.py",
     "client/*.py",
     "server.cpp",
@@ -35,6 +36,6 @@
     "rmpsm_server.*"
   ],
   "scripts": {
-    "test": "exit 0"
+    "test": "node test.js"
   }
 }

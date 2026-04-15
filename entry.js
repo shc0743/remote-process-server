@@ -7,7 +7,8 @@ import { readdirSync, copyFileSync, existsSync, readFileSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const CLIENT_PY = join(join(__dirname, 'client'), 'client.py');
-const PKG = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+const PKG = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
+const ISWINDOWS = process.platform === 'win32';
 
 function getSupportedArchs() {
     const files = readdirSync(__dirname);
@@ -28,7 +29,7 @@ function getCurrentArch() {
         process.exit(1);
     }
     try {
-        return execSync(`python "${script}"`, { encoding: 'utf8' }).trim();
+        return execSync(`python "${script}"`, { encoding: 'utf-8' }).trim();
     } catch (err) {
         console.error('Error executing sys_name.py:', err.message);
         process.exit(1);
@@ -51,8 +52,8 @@ function runServerBinary(arch, args) {
     child.on('exit', (code) => process.exit(code));
 }
 
-function runPythonClient(args) {
-    const child = spawn('python', [CLIENT_PY, ...args], { stdio: 'inherit' });
+function runPythonClient(args, pure = true, headless = false) {
+    const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...((ISWINDOWS && !pure) ? args.map(a => a.replace(/\\"/g, '""')) : args)], { stdio: 'inherit', detached: !!headless });
     child.on('exit', (code) => process.exit(code));
 }
 
@@ -73,7 +74,7 @@ switch (action) {
         break;
 
     case 'run':
-        runPythonClient(['--type=client', ...restArgs]);
+        runPythonClient(['--type=client', ...restArgs], false);
         break;
 
     case 'kill':

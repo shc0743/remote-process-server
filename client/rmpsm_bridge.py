@@ -55,7 +55,10 @@ class ServerBridge:
 
         if self.proc.stdin is None or self.proc.stdout is None:
             raise RuntimeError("failed to start server process")
-        print('Server process started, waiting for connection...', file=sys.stderr)
+        try:
+            print('Server process started, waiting for connection...', file=sys.stderr)
+        except BaseException:
+            pass
 
         self.stdin_fd = self.proc.stdin.fileno()
         self.stdout_fd = self.proc.stdout.fileno()

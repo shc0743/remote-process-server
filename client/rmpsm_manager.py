@@ -48,7 +48,10 @@ class Manager:
 
         self.bridge = ServerBridge(self, server_path, stderr)
         
-        print('Server has been started', file=sys.stderr)
+        try:
+            print('Server has been started', file=sys.stderr)
+        except BaseException:
+            pass
 
     def _new_session_id(self) -> str:
         with self._session_lock:
@@ -87,7 +90,10 @@ class Manager:
         if self.stop_event.is_set():
             return
         self.stop_event.set()
-        print("Shutdowning server...", file=sys.stderr)
+        try:
+            print("Shutdowning server...", file=sys.stderr)
+        except BaseException:
+            pass
 
         try:
             self.bridge.send_stop()
@@ -241,7 +247,10 @@ class Manager:
                         continue
 
                     if msg_type == C2M_STOP_MANAGER:
-                        print("Stop request received, shutdowning server...", file=sys.stderr)
+                        try:
+                            print("Stop request received, shutdowning server...", file=sys.stderr)
+                        except BaseException:
+                            pass
                         request_id = bytes_to_u64(payload[:8]) if len(payload) >= 8 else 0
                         if session is not None:
                             session.send_generic_resp(request_id, True, 0, "")

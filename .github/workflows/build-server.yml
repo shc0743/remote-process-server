@@ -38,31 +38,24 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: rmpsm_server.linux_*
+          path: rmpsm_server.*
 
   build-android:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: aarch64
-            target: aarch64-linux-android
-            api: 21
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Compile (${{ matrix.arch }})
+      - name: Compile
         run: |
-          $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.target }}${{ matrix.api }}-clang++ \
+          $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++ \
             -std=c++20 \
             -I. \
-            -o rmpsm_server.android_${{ matrix.arch }} \
+            -o rmpsm_server.android_aarch64 \
             server.cpp
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: rmpsm_server.android_${{ matrix.arch }}
+          path: rmpsm_server.*
