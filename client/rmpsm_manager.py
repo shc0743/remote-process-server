@@ -37,15 +37,20 @@ class Manager:
         self.connection_file = connection_file
         self.server_path = server_path
         self.stderr = stderr
-
-        self._base_dir = os.path.dirname(self.connection_file) or "."
-        os.makedirs(self._base_dir, exist_ok=True)
-
+        
+        if os.name != "nt":
+            self._base_dir = os.path.dirname(self.connection_file) or "."
+            os.makedirs(self._base_dir, exist_ok=True)
+        else:
+            self._base_dir = ""
+        
         self.stop_event = threading.Event()
         self.sessions: Dict[str, SessionProxy] = {}
         self._session_lock = threading.Lock()
         self._next_session_id = 1
-
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_started = False
+        
         self.bridge = ServerBridge(self, server_path, stderr)
         
         try:
@@ -87,34 +92,42 @@ class Manager:
         self.stop_event.set()
 
     def shutdown(self) -> None:
-        if self.stop_event.is_set():
-            return
+        with self._shutdown_lock:
+            if self._shutdown_started:
+                return
+            self._shutdown_started = True
+        
         self.stop_event.set()
         try:
             print("Shutdowning server...", file=sys.stderr)
         except BaseException:
             pass
-
+        
         try:
             self.bridge.send_stop()
         except Exception:
             pass
-
+        
         try:
             self.bridge.stop()
         except Exception:
             pass
-
+        
         with self._session_lock:
             sessions = list(self.sessions.values())
             self.sessions.clear()
-
+        
         for session in sessions:
             try:
                 session.close()
             except Exception:
                 pass
-
+        
+        try:
+            close_connection_info(self.connection_file)
+        except Exception:
+            pass
+        
         safe_unlink(self.connection_file)
 
     def run(self) -> None:

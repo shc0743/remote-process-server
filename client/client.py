@@ -6,7 +6,7 @@ import platform
 import os
 import sys
 
-from rmpsm_protocol import default_connection_file
+from rmpsm_protocol import default_connection_file, probe_connection_info
 from rmpsm_runtime import ClientRuntime, Manager, kill_manager
 
 
@@ -40,25 +40,11 @@ def main() -> int:
         return 2
 
     if args.type == "manager":
-        # Check if another manager with same configuration is already running
-        # by testing whether the connection file exists and is connectable.
-        import socket
-        import json
-        from rmpsm_protocol import read_connection_info
-        if os.path.exists(args.manager):
-            try:
-                address, _authkey = read_connection_info(args.manager)
-                # Try to connect to the address with a short timeout
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(1.0)
-                s.connect(address)
-                s.close()
-                # Connection succeeded, meaning a manager is already running
-                print("Error: another manager with the same configuration is already running", file=sys.stderr)
-                return 1
-            except (FileNotFoundError, json.JSONDecodeError, ValueError, OSError, socket.timeout, ConnectionRefusedError):
-                # Connection file is invalid or cannot connect, assume no manager is running
-                pass
+        # Check if another manager with the same configuration is already running
+        # by trying to read one bootstrap payload from the endpoint.
+        if probe_connection_info(args.manager, timeout=1.0):
+            print("Error: another manager with the same configuration is already running", file=sys.stderr)
+            return 1
         mgr = Manager(args.manager, args.server, args.stderr)
         mgr.run()
         return 0

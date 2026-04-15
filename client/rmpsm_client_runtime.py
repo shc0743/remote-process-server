@@ -45,7 +45,6 @@ from rmpsm_protocol import (
     read_connection_info,
 )
 
-
 class ClientRuntime:
     def __init__(self, connection_file: str, cmd_argv: List[str], useCmdSyntax: bool):
         self.connection_file = connection_file
@@ -242,16 +241,18 @@ class ClientRuntime:
             return
 
     def open_manager_session(self) -> None:
-        if not os.path.exists(self.connection_file):
-            raise FileNotFoundError(f"Manager connection file not found: {self.connection_file}")
-
         startup_deadline = time.monotonic() + 180.0
         last_error: Optional[BaseException] = None
+
+        # POSIX 上 bootstrap 载体是普通文件。文件都不存在，就说明 manager 根本没启动，
+        # 这时不应该进入“等它慢慢起来”的重试逻辑。
+        if os.name != "nt" and not os.path.exists(self.connection_file):
+            raise FileNotFoundError(f"manager is not running: {self.connection_file}")
 
         while time.monotonic() < startup_deadline and not self.stop_event.is_set():
             sock: Optional[socket.socket] = None
             try:
-                address, authkey = read_connection_info(self.connection_file)
+                address, authkey = read_connection_info(self.connection_file, timeout=0.5)
 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2.0)
@@ -312,6 +313,9 @@ class ClientRuntime:
                 self._reader_thread.start()
                 return
 
+            except FileNotFoundError as e:
+                raise RuntimeError("manager is not running") from e
+                last_error = e
             except Exception as e:
                 last_error = e
                 if sock is not None:
@@ -322,10 +326,10 @@ class ClientRuntime:
                 self._socket = None
                 self._reader = None
 
-                if isinstance(e, RuntimeError) and "authentication failed" in str(e):
+                if isinstance(e, RuntimeError):
                     raise
 
-                time.sleep(0.5)
+            time.sleep(0.2)
 
         raise TimeoutError("manager startup timed out") from last_error
 
@@ -356,20 +360,20 @@ class ClientRuntime:
             if not arg:
                 parts.append('""')
                 continue
-    
+
             need_quote = any(ch in ' \t\n\v"' for ch in arg)
-    
+
             if not need_quote:
                 parts.append(arg)
             else:
                 escaped = arg.replace('"', '""')
                 parts.append(f'"{escaped}"')
-    
+
         return ' '.join(parts)
 
     def run(self) -> int:
         self.open_manager_session()
-        
+
         cmdline = ((self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else subprocess.list2cmdline(self.cmd_argv)) if os.name == 'nt' else shlex.join(self.cmd_argv)).encode("utf-8")
 
         self._create_task_request_id = self._next_req_id()
@@ -428,14 +432,9 @@ class ClientRuntime:
 
         return int(self.exit_code or 0)
 
-
 def kill_manager(connection_file: str) -> int:
-    if not os.path.exists(connection_file):
-        print(f"Manager connection file not found: {connection_file}", file=sys.stderr)
-        return 1
-
     try:
-        address, authkey = read_connection_info(connection_file)
+        address, authkey = read_connection_info(connection_file, timeout=3.0)
     except Exception as e:
         print(f"Failed to read connection info: {e}", file=sys.stderr)
         return 1

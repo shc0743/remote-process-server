@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import socket
@@ -42,9 +43,48 @@ M2C_TASK_END = 16
 M2C_SERVER_DEAD = 17
 
 
+def _default_user_suffix() -> str:
+    if os.name != "nt":
+        return ""
+
+    import getpass
+    import re
+
+    user = (
+        os.environ.get("USERNAME")
+        or os.environ.get("USER")
+        or getpass.getuser()
+        or "unknown"
+    )
+    user = hashlib.sha256(user.encode()).hexdigest()
+    if not user:
+        return ""
+    return "." + user
+
+
 def default_connection_file() -> str:
+    if os.name == "nt":
+        return r"\\.\pipe\remote_process_server_bootstrap" + _default_user_suffix()
     base = os.environ.get("TMPDIR") or tempfile.gettempdir()
-    return os.path.join(base, "rmpsm_manager.conn")
+    return os.path.join(base, "remote_process_server.bootstrap")
+
+
+def write_connection_info(path: str, address: Tuple[str, int], authkey: bytes) -> None:
+    from rmpsm_bootstrap import write_connection_info as _write_connection_info
+
+    _write_connection_info(path, address, authkey)
+
+
+def read_connection_info(path: str, timeout: float = 5.0) -> Tuple[Tuple[str, int], bytes]:
+    from rmpsm_bootstrap import read_connection_info as _read_connection_info
+
+    return _read_connection_info(path, timeout=timeout)
+
+
+def probe_connection_info(path: str, timeout: float = 1.0) -> bool:
+    from rmpsm_bootstrap import probe_connection_info as _probe_connection_info
+
+    return _probe_connection_info(path, timeout=timeout)
 
 
 def u64_to_bytes(v: int) -> bytes:
@@ -272,19 +312,3 @@ class ControlFrameReader:
             del self.buf[:frame_len]
             return int(msg_type), int(flags), payload
 
-
-def write_connection_info(path: str, address: Tuple[str, int], authkey: bytes) -> None:
-    info = {
-        "address": list(address),
-        "authkey": base64.b64encode(authkey).decode("ascii"),
-    }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(info, f)
-
-
-def read_connection_info(path: str) -> Tuple[Tuple[str, int], bytes]:
-    with open(path, "r", encoding="utf-8") as f:
-        info = json.load(f)
-    address = (info["address"][0], int(info["address"][1]))
-    authkey = base64.b64decode(info["authkey"].encode("ascii"))
-    return address, authkey
