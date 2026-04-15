@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import platform
+import os
 import sys
 
 from rmpsm_protocol import default_connection_file
@@ -41,7 +42,6 @@ def main() -> int:
     if args.type == "manager":
         # Check if another manager with same configuration is already running
         # by testing whether the connection file exists and is connectable.
-        import os
         import socket
         import json
         from rmpsm_protocol import read_connection_info
@@ -71,7 +71,13 @@ def main() -> int:
         return 2
 
     client = ClientRuntime(args.manager, remainder, args.cmd_syntax)
-    return client.run()
+    try:
+        return client.run()
+    except BaseException as e:
+        print(e, file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        os._exit(-1)
 
 
 if __name__ == "__main__":

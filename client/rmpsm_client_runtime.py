@@ -6,6 +6,7 @@ import queue
 import select
 import shlex
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -349,7 +350,7 @@ class ClientRuntime:
         finally:
             self.stop_event.set()
 
-    def _join_cmdline_for_cmd(args):
+    def _join_cmdline_for_cmd(self, args):
         parts = []
         for arg in args:
             if not arg:
@@ -368,11 +369,13 @@ class ClientRuntime:
 
     def run(self) -> int:
         self.open_manager_session()
+        
+        cmdline = ((self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else subprocess.list2cmdline(self.cmd_argv)) if os.name == 'nt' else shlex.join(self.cmd_argv)).encode("utf-8")
 
         self._create_task_request_id = self._next_req_id()
         self._send_frame(
             C2M_CREATE_TASK,
-            pack_create_task_request(self._create_task_request_id, (self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else (subprocess.list2cmdline(self.cmd_argv)) if os.name == 'nt' else shlex.join(self.cmd_argv)).encode("utf-8")),
+            pack_create_task_request(self._create_task_request_id, cmdline),
         )
 
         self._stdin_thread = threading.Thread(target=self._stdin_loop, daemon=(os.name == "nt"))

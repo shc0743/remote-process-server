@@ -52,8 +52,8 @@ function runServerBinary(arch, args) {
     child.on('exit', (code) => process.exit(code));
 }
 
-function runPythonClient(args, pure = true, headless = false) {
-    const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...args], { stdio: 'inherit', detached: !!headless, windowsVerbatimArguments: pure ? true : false });
+function runPythonClient(args, headless = false) {
+    const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...args], { stdio: 'inherit', detached: !!headless });
     child.on('exit', (code) => process.exit(code));
 }
 
@@ -74,7 +74,11 @@ switch (action) {
         break;
 
     case 'run':
-        runPythonClient(['--type=client', ...restArgs], false);
+        runPythonClient(['--type=client', ...restArgs]);
+        break;
+
+    case 'run-headless':
+        runPythonClient(['--type=client', ...restArgs], true);
         break;
 
     case 'kill':
@@ -144,6 +148,7 @@ switch (action) {
   serve        Alias for \`start\`; deprecated
 \x1b[1mClient commands\x1b[0m
   run          Run something via the manager
+  run-headless Run something via the manager without waiting
   stop         Send stop request to the manager
   kill         Alias for \`stop\`
 \x1b[1mServer commands\x1b[0m
