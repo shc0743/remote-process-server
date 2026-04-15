@@ -19,7 +19,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        default="./rmpsm_server." + str(platform.system().lower()) + "_" + str(platform.machine().lower()),
+        default="./rmpsm_server." + str(platform.system().lower()) + "-" + str(platform.machine().lower()),
         help="[Manager only] specify the server startup command"
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")

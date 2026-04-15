@@ -18,6 +18,21 @@ jobs:
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           compile.cmd
 
+      - name: Setup Node.js for testing
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install npm dependencies
+        shell: cmd
+        run: |
+          npm ci || npm i
+
+      - name: Run tests
+        shell: cmd
+        run: |
+          npm test
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -33,6 +48,19 @@ jobs:
       - name: Compile
         run: |
           ./compile.sh
+
+      - name: Setup Node.js for testing
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install npm dependencies
+        run: |
+          npm ci || npm i
+
+      - name: Run tests
+        run: |
+          npm test
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
