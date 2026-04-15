@@ -89,7 +89,8 @@ inline std::wstring utf8_to_wide(const std::string& s) {
     return out;
 }
 
-inline std::wstring quote_windows_arg(const std::wstring& arg) {
+#if 0
+inline std::wstring quote_windows_arg(const std::wstring& arg, bool useCmdSyntax = true) {
     if (arg.empty()) {
         return L"\"\"";
     }
@@ -108,44 +109,56 @@ inline std::wstring quote_windows_arg(const std::wstring& arg) {
 
     std::wstring out;
     out.push_back(L'"');
-
-    size_t backslashes = 0;
-    for (wchar_t ch : arg) {
-        if (ch == L'\\') {
-            ++backslashes;
-            continue;
+    
+    if (useCmdSyntax) {
+        for (wchar_t ch : arg) {
+            if (ch == L'"') {
+                out.push_back(L'"');
+                out.push_back(L'"');
+            } else {
+                out.push_back(ch);
+            }
         }
-
-        if (ch == L'"') {
-            out.append(backslashes * 2 + 1, L'\\');
-            out.push_back(L'"');
-            backslashes = 0;
-            continue;
+    } else {
+        size_t backslashes = 0;
+        for (wchar_t ch : arg) {
+            if (ch == L'\\') {
+                ++backslashes;
+                continue;
+            }
+    
+            if (ch == L'"') {
+                out.append(backslashes * 2 + 1, L'\\');
+                out.push_back(L'"');
+                backslashes = 0;
+                continue;
+            }
+    
+            if (backslashes > 0) {
+                out.append(backslashes, L'\\');
+                backslashes = 0;
+            }
+            out.push_back(ch);
         }
-
+    
         if (backslashes > 0) {
-            out.append(backslashes, L'\\');
-            backslashes = 0;
+            out.append(backslashes * 2, L'\\');
         }
-        out.push_back(ch);
-    }
-
-    if (backslashes > 0) {
-        out.append(backslashes * 2, L'\\');
     }
 
     out.push_back(L'"');
     return out;
 }
 
-inline std::wstring build_windows_command_line(const std::vector<std::string>& args) {
+inline std::wstring build_windows_command_line(const std::vector<std::string>& args, bool useCmdSyntax = true) {
     std::wstring cmd;
     for (size_t i = 0; i < args.size(); ++i) {
         if (i > 0) cmd.push_back(L' ');
-        cmd += quote_windows_arg(utf8_to_wide(args[i]));
+        cmd += quote_windows_arg(utf8_to_wide(args[i]), useCmdSyntax);
     }
     return cmd;
 }
+#endif
 
 struct Win32TaskRuntime {
     HANDLE process = nullptr;
@@ -567,7 +580,7 @@ inline bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
         return false;
     }
 
-    std::wstring cmd = build_windows_command_line(args);
+    std::wstring cmd = utf8_to_wide(cmdline);
     if (cmd.empty()) {
         outErr = EINVAL;
         return false;
@@ -618,15 +631,18 @@ inline bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
     si.hStdInput = childStdInRd;
     si.hStdOutput = childStdOutWr;
     si.hStdError = childStdErrWr;
+    
+    auto appName = utf8_to_wide(args[0]);
+    bool useAppName = GetFileAttributesW(appName.c_str()) != INVALID_FILE_ATTRIBUTES; // if the specified object can be found, use it directly
 
     PROCESS_INFORMATION pi{};
     BOOL ok = CreateProcessW(
-        nullptr,
+        useAppName ? appName.c_str() : nullptr,
         cmdMutable.data(),
         nullptr,
         nullptr,
         TRUE,
-        CREATE_NO_WINDOW,
+        CREATE_NO_WINDOW | CREATE_DEFAULT_ERROR_MODE | CREATE_NEW_PROCESS_GROUP,
         nullptr,
         nullptr,
         &si,

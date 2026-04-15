@@ -46,7 +46,7 @@ from rmpsm_protocol import (
 
 
 class ClientRuntime:
-    def __init__(self, connection_file: str, cmd_argv: List[str]):
+    def __init__(self, connection_file: str, cmd_argv: List[str], useCmdSyntax: bool):
         self.connection_file = connection_file
         self.cmd_argv = cmd_argv
 
@@ -75,8 +75,7 @@ class ClientRuntime:
         self._stderr_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
 
         self._create_task_request_id: Optional[int] = None
-        
-        print('[DEBUG]CMD_ARGV:', cmd_argv)
+        self._useCmdSyntax = useCmdSyntax
 
     def _next_req_id(self) -> int:
         with self._req_lock:
@@ -350,13 +349,30 @@ class ClientRuntime:
         finally:
             self.stop_event.set()
 
+    def _join_cmdline_for_cmd(args):
+        parts = []
+        for arg in args:
+            if not arg:
+                parts.append('""')
+                continue
+    
+            need_quote = any(ch in ' \t\n\v"' for ch in arg)
+    
+            if not need_quote:
+                parts.append(arg)
+            else:
+                escaped = arg.replace('"', '""')
+                parts.append(f'"{escaped}"')
+    
+        return ' '.join(parts)
+
     def run(self) -> int:
         self.open_manager_session()
 
         self._create_task_request_id = self._next_req_id()
         self._send_frame(
             C2M_CREATE_TASK,
-            pack_create_task_request(self._create_task_request_id, shlex.join(self.cmd_argv).encode("utf-8")),
+            pack_create_task_request(self._create_task_request_id, (self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else (subprocess.list2cmdline(self.cmd_argv)) if os.name == 'nt' else shlex.join(self.cmd_argv)).encode("utf-8")),
         )
 
         self._stdin_thread = threading.Thread(target=self._stdin_loop, daemon=(os.name == "nt"))

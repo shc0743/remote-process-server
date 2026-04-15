@@ -9,18 +9,29 @@ try { execSync('node entry.js kill') } catch {} // kill old processes to avoid c
 const server = await waitFor('node', ['entry.js', 'daemon'], 'Server has been started');
 echo('√ Server started');
 
+// 1. test basic command
+const simpleExpect = (id, cmd) => (expect(id, 'node entry.js run ' + cmd, resultOf(cmd)));
+simpleExpect(1.1, ISWINDOWS ? 'cmd /D /c dir' : 'ls');
+simpleExpect(1.2, ISWINDOWS ? 'cmd /D /c dir %SystemRoot%' : 'ls /');
+
+// 2. test complex command
+ISWINDOWS ? console.log('√ 2.1 Skipped') : expect(2.1, `node|entry.js|run|bash|-c|cat << EOF
+Hello World!
+This is a text.
+EOF`.split('|'), 'Hello World!\nThis is a text.');
+simpleExpect(2.2, ISWINDOWS ? 'cmd /D /c cd' : 'bash -c pwd');
 
 // 3. test commands with space
 ensureDir('Dir space');
 fs.writeFileSync('Dir space/test.txt', 'Content');
-expect(3.1, ISWINDOWS ? 'node entry.js run cmd /d /c "echo ""Dir space\\test.txt"""' : 'cat "Dir space/test.txt"', 'Content');
+expect(3.1, ISWINDOWS ? 'node entry.js run --cmd-syntax -- cmd /d /c "echo ""Dir space\\test.txt"""' : 'cat "Dir space/test.txt"', 'Content');
 fs.unlinkSync('Dir space/test.txt');
 fs.rmdirSync('Dir space');
 
 // 4. test commands with Unicode texts, such as Chinese
 ensureDir('中文 space');
 fs.writeFileSync('中文 space/test.txt', '中文Content');
-expect(3.1, ISWINDOWS ? 'node entry.js run cmd /d /c "chcp 65001 & type ""中文 space\\test.txt"""' : 'cat "中文 space/test.txt"', '中文Content');
+expect(3.1, ISWINDOWS ? 'node entry.js run --cmd-syntax -- cmd /d /c "chcp 65001 & type ""中文 space\\test.txt"""' : 'cat "中文 space/test.txt"', '中文Content');
 fs.unlinkSync('中文 space/test.txt');
 fs.rmdirSync('中文 space');
 

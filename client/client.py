@@ -24,6 +24,7 @@ def main() -> int:
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")
     parser.add_argument("--kill", action="store_true", help="[Client only] Kill the manager process")
+    parser.add_argument("--cmd-syntax", action="store_true", help="[Client only][Windows only] Use CMD's quota syntax")
     args, remainder = parser.parse_known_args()
 
     if remainder and remainder[0] == "--":
@@ -69,7 +70,7 @@ def main() -> int:
         print("client mode requires a command after --\nuse --help to show help information", file=sys.stderr)
         return 2
 
-    client = ClientRuntime(args.manager, remainder)
+    client = ClientRuntime(args.manager, remainder, args.cmd_syntax)
     return client.run()
 
 
