@@ -53,7 +53,7 @@ function runServerBinary(arch, args) {
 }
 
 function runPythonClient(args, pure = true, headless = false) {
-    const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...((ISWINDOWS && !pure) ? args.map(a => a.replace(/\\"/g, '""')) : args)], { stdio: 'inherit', detached: !!headless });
+    const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...args], { stdio: 'inherit', detached: !!headless, windowsVerbatimArguments: pure ? true : false });
     child.on('exit', (code) => process.exit(code));
 }
 

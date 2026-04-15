@@ -75,6 +75,8 @@ class ClientRuntime:
         self._stderr_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
 
         self._create_task_request_id: Optional[int] = None
+        
+        print('[DEBUG]CMD_ARGV:', cmd_argv)
 
     def _next_req_id(self) -> int:
         with self._req_lock:
