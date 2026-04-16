@@ -91,6 +91,21 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 TokenUser = 1
 TokenIntegrityLevel = 25
 
+advapi32.ConvertSidToStringSidW.argtypes = [LPVOID, ctypes.POINTER(LPCWSTR)]
+advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+
+
+def sid_to_string(sid_ptr):
+    out = LPCWSTR()
+
+    if not advapi32.ConvertSidToStringSidW(sid_ptr, ctypes.byref(out)):
+        _raise_last_error("ConvertSidToStringSidW")
+
+    try:
+        return out.value
+    finally:
+        kernel32.LocalFree(out)
+
 
 class SID_AND_ATTRIBUTES(ctypes.Structure):
     _fields_ = [
@@ -143,16 +158,17 @@ def _raise_last_error(prefix: str) -> None:
     raise WinPipeError(err, f"{prefix} failed with error {err}")
 
 
-def _get_token_user_sid(token) -> bytes:
-    size = wintypes.DWORD()
-    GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
+def _get_token_user_sid(token) -> str:
+    size = wintypes.DWORD(0)
 
+    GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
     buf = ctypes.create_string_buffer(size.value)
+
     if not GetTokenInformation(token, TokenUser, buf, size, ctypes.byref(size)):
         _raise_last_error("GetTokenInformation(TokenUser)")
 
     tu = ctypes.cast(buf, ctypes.POINTER(TOKEN_USER)).contents
-    return ctypes.string_at(tu.User.Sid, 68)  # SID max size
+    return sid_to_string(tu.User.Sid)
 
 
 def _get_token_integrity(token) -> int:
@@ -179,10 +195,16 @@ def _check_client_allowed(pipe_handle: wintypes.HANDLE) -> bool:
     server_token = _open_process_token(os.getpid())
 
     try:
-        if _get_token_user_sid(client_token) != _get_token_user_sid(server_token):
+        csid = _get_token_user_sid(client_token)
+        ssid = _get_token_user_sid(server_token)
+        if csid != ssid:
+            #print('Security: Client with', csid, 'wants to connect', ssid, ', Denied', file=sys.stderr)
             return False
 
-        if _get_token_integrity(client_token) < _get_token_integrity(server_token):
+        ci = _get_token_integrity(client_token)
+        si = _get_token_integrity(server_token)
+        if ci < si:
+            #print('Security: Client with integrity', ci, 'wants to connect', si, ', Denied', file=sys.stderr)
             return False
 
         return True
@@ -327,6 +349,9 @@ def _write_all_handle(handle: wintypes.HANDLE, data: bytes) -> None:
         written = wintypes.DWORD()
         buf = ctypes.create_string_buffer(data[total:])
         if not kernel32.WriteFile(handle, buf, len(data) - total, ctypes.byref(written), None):
+            err = ctypes.get_last_error()
+            if err == 232:
+                return
             _raise_last_error("WriteFile")
         if written.value <= 0:
             raise WinPipeError(errno.EIO, "short write")
@@ -365,7 +390,9 @@ def read_named_pipe_line(pipe_name: str, timeout: float = 5.0) -> bytes:
         if err == ERROR_FILE_NOT_FOUND:
             raise FileNotFoundError(f"bootstrap pipe not found: {pipe_name}")
         if err == 233:
-            raise RuntimeError(f"bootstrap pipe was force closed by the peer: {pipe_name}")
+            raise FileNotFoundError(f"bootstrap pipe was force closed by the peer: {pipe_name}")
+        if err == 5:
+            raise FileNotFoundError(f"Access denied: {pipe_name}")
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError(f"bootstrap pipe not ready: {pipe_name}")
         time.sleep(0.05)
@@ -379,6 +406,8 @@ def read_named_pipe_line(pipe_name: str, timeout: float = 5.0) -> bytes:
                 err = ctypes.get_last_error()
                 if err == ERROR_BROKEN_PIPE:
                     break
+                if err == 233:
+                    raise FileNotFoundError(f"bootstrap pipe was force closed by the peer")
                 _raise_last_error("ReadFile")
             if read.value == 0:
                 break

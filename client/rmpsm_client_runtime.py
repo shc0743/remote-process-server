@@ -314,10 +314,8 @@ class ClientRuntime:
                 return
 
             except FileNotFoundError as e:
-                raise RuntimeError("manager is not running") from e
+                raise e
                 last_error = e
-            except RuntimeError as e:
-                raise
             except Exception as e:
                 last_error = e
                 if sock is not None:
