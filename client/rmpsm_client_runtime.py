@@ -241,7 +241,7 @@ class ClientRuntime:
             return
 
     def open_manager_session(self) -> None:
-        startup_deadline = time.monotonic() + 180.0
+        startup_deadline = time.monotonic() + 10.0
         last_error: Optional[BaseException] = None
 
         # POSIX 上 bootstrap 载体是普通文件。文件都不存在，就说明 manager 根本没启动，
@@ -262,7 +262,7 @@ class ClientRuntime:
                 self._reader = ControlFrameReader(sock)
 
                 self._send_frame(C2M_AUTH, authkey)
-                auth_deadline = time.monotonic() + 120.0
+                auth_deadline = time.monotonic() + 8.0
                 while time.monotonic() < auth_deadline:
                     try:
                         frame = self._reader.read_frame()
@@ -281,7 +281,7 @@ class ClientRuntime:
                 req_id = self._next_req_id()
                 self._send_frame(C2M_CREATE_SESSION, pack_create_session_request(req_id))
 
-                session_deadline = time.monotonic() + 120.0
+                session_deadline = time.monotonic() + 20.0
                 while time.monotonic() < session_deadline:
                     try:
                         frame = self._reader.read_frame()
@@ -316,6 +316,8 @@ class ClientRuntime:
             except FileNotFoundError as e:
                 raise RuntimeError("manager is not running") from e
                 last_error = e
+            except RuntimeError as e:
+                raise
             except Exception as e:
                 last_error = e
                 if sock is not None:

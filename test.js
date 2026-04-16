@@ -1,18 +1,24 @@
 import { spawn, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 //#region lib
-const ISWINDOWS = process.platform === 'win32', echo = v => console.log(v), resultOf = cmdOrArgs => (typeof cmdOrArgs === 'string' ? execSync(cmdOrArgs, { encoding: 'utf-8', windowsVerbatimArguments: true }) : spawnSync(cmdOrArgs.shift(), cmdOrArgs, { shell: false, encoding: 'utf-8', windowsVerbatimArguments: true }).stdout).trim(), expect = (testId, cmdOrArgs, expected, timeout = 10000) => { const t = setTimeout(() => { console.error(new Error('Test #' + testId + ': Timed-out')); process.exit(1) }, timeout); const fact = resultOf(cmdOrArgs); clearTimeout(t); if (expected !== fact) { execSync('node entry.js kill'); throw new Error('In test #' + testId + '; Result is not expected; expected:\n' + expected + '\n\nBut in fact the result is:\n' + fact) } echo('√ ' + testId + ' passed'); return true }, waitFor = (command, args, waitForText, timeout = 10000) => new Promise((resolve, reject) => { const i = 'ignore', p = 'pipe', D = 'data', e = 'exit', E = 'error', c = spawn(command, args, { stdio: [i, p, p], shell: false }); const t = setTimeout(() => (c.kill(), reject(new Error('Timeout: ' + command + ' ' + args))), timeout); let o = ''; const d = D => (o += D.toString(), o.includes(waitForText)) && (clearTimeout(t), resolve(c)); 'out,err'.split(',').forEach(f => c['std' + f].on(D, d)), c.on(E, e => (clearTimeout(t), reject(e))), c.on(e, code => (clearTimeout(t), reject(new Error(`Process exited without result, code: ${code}, output: ${o}`)))) }), ensureDir = d => !fs.existsSync(d) && fs.mkdirSync(d);
+const ISWINDOWS = process.platform === 'win32', echo = v => console.log(v), resultOf = cmdOrArgs => (typeof cmdOrArgs === 'string' ? execSync(cmdOrArgs, { encoding: 'utf-8', windowsVerbatimArguments: true }) : spawnSync(cmdOrArgs.shift(), cmdOrArgs, { shell: false, encoding: 'utf-8', windowsVerbatimArguments: true }).stdout).trim(), expect = (testId, cmdOrArgs, expected, timeout = 10000) => { const t = setTimeout(() => { console.error(new Error('Test #' + testId + ': Timed-out')); process.exit(1) }, timeout); const fact = resultOf(cmdOrArgs); clearTimeout(t); if (expected !== fact) { execSync('node entry.js kill'); throw new Error('In test #' + testId + '; Result is not expected; expected:\n' + expected + '\n\nBut in fact the result is:\n' + fact) } echo('√ ' + testId + ' passed'); return true }, waitFor = (command, args, waitForText, timeout = 10000) => new Promise((resolve, reject) => { const i = 'ignore', p = 'pipe', D = 'data', e = 'exit', E = 'error', c = spawn(command, args, { stdio: [i, p, p], shell: false }); const t = setTimeout(() => (c.kill(), reject(new Error('Timeout: ' + command + ' ' + args))), timeout); let o = ''; const d = D => (o += D.toString(), o.includes(waitForText)) && (clearTimeout(t), resolve({ process: c, get output() { return o } })); 'out,err'.split(',').forEach(f => c['std' + f].on(D, d)), c.on(E, e => (clearTimeout(t), reject(e))), c.on(e, code => (clearTimeout(t), reject(new Error(`Process exited without result, code: ${code}, output: ${o}`)))) }), ensureDir = d => !fs.existsSync(d) && fs.mkdirSync(d);
 //#endregion lib
 
 // 0. start server
-try { execSync('node entry.js kill') } catch {} // kill old processes to avoid conflict
+try { execSync('node entry.js kill', { stdio: 'ignore' }) } catch {} // kill old processes to avoid conflict
 const server = await waitFor('node', ['entry.js', 'daemon'], 'Server has been started');
 echo('√ Server started');
+server.process.on('exit', (code, signal) => {
+    if (!code) return;
+    throw new Error('Server exited unexpectedly!! Code: ' + code + ', Signal: ' + signal + ', output:\n' + server.output);
+});
+// Sleep for a while to check the server status
+await new Promise(r => setTimeout(r, 3000));
 
 // 1. test basic command
 const simpleExpect = (id, cmd) => (expect(id, 'node entry.js run ' + cmd, resultOf(cmd)));
 simpleExpect(1.1, ISWINDOWS ? 'cmd /D /c dir' : 'ls');
-simpleExpect(1.2, ISWINDOWS ? 'cmd /D /c dir %SystemRoot%' : 'ls /');
+simpleExpect(1.2, ISWINDOWS ? 'cmd /D /c dir %SystemRoot%' : 'bash -ic "ls ~"');
 
 // 2. test complex command
 ISWINDOWS ? console.log('√ 2.1 Skipped') : expect(2.1, `node|entry.js|run|bash|-c|cat << EOF
@@ -38,4 +44,5 @@ fs.rmdirSync('中文 space');
 
 // cleanup
 execSync('node entry.js kill');
+process.exit(0);
 

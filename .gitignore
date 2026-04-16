@@ -1,4 +1,5 @@
 rmpsm_server.*
+server_version.h
 dev-custom
 *.out
 *.o

@@ -69,7 +69,6 @@ switch (action) {
         console.warn('Warning: action "serve" is deprecated and may be removed later; use "daemon" instead');
         // [[fallthrough]];
     case 'daemon':
-        process.chdir(__dirname);
         runPythonClient(['--type=manager', ...restArgs]);
         break;
 

@@ -45,7 +45,7 @@ class ServerBridge:
 
         self.proc = subprocess.Popen(
             args,
-            executable=args[0] if os.name == "nt" and os.path.exists(args[0]) else None,
+            #executable=args[0] if os.name == "nt" and os.path.exists(args[0]) else None,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=stderr_handle,

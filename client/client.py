@@ -11,6 +11,7 @@ from rmpsm_runtime import ClientRuntime, Manager, kill_manager
 
 
 def main() -> int:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser()
     parser.add_argument("--type", choices=["manager", "client"], default="client")
     parser.add_argument(
@@ -20,7 +21,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        default="./rmpsm_server." + str(platform.system().lower()) + "-" + str(platform.machine().lower()),
+        default=os.path.join(current_dir, "../rmpsm_server." + str(platform.system().lower()) + "_" + str(platform.machine().lower())) + ('.' if os.name == 'nt' else ''),
         help="[Manager only] specify the server startup command"
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")

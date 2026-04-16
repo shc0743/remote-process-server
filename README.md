@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/remote-process-server.svg)](https://www.npmjs.com/package/remote-process-server)
 [![license](https://img.shields.io/npm/l/remote-process-server.svg)](LICENSE)
 
-A client/server system for creating and managing processes across machines, shells, and transport layers.
+A client/server system for creating and managing processes over a framed process-control protocol over a trusted byte stream.
 
 `remote-process-server` v3 is still not stable. The main goal is to keep the server side small, dependency-free, and easy to launch in unusual environments.
 
@@ -34,7 +34,6 @@ The server is designed to be **zero-dependency** and to communicate through stan
 
 - local execution
 - SSH
-- Codespaces
 - `npx`
 - custom launchers
 - any pipe-based or RPC-like transport that can keep the server connected
