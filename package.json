@@ -1,6 +1,6 @@
 {
   "name": "remote-process-server",
-  "version": "3.0.0-rc.5",
+  "version": "3.0.0-rc.6",
   "description": "A client/server system for remotely creating and managing processes",
   "bin": {
     "remote-process-server": "entry.js"
@@ -33,7 +33,6 @@
     "client/*.py",
     "server.cpp",
     "server/**/*",
-    "server_version.h",
     "compile.*",
     "sys_name.py",
     "rmpsm_server.*"

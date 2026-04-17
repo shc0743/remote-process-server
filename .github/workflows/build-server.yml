@@ -91,11 +91,7 @@ jobs:
 
       - name: Compile
         run: |
-          $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++ \
-            -std=c++20 \
-            -I. \
-            -o rmpsm_server.android_aarch64 \
-            server.cpp
+          ./compile.sh android_aarch64 $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++ $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
