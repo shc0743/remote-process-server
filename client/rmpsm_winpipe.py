@@ -266,14 +266,18 @@ class NamedPipeBootstrapServer:
         self.pipe_name = pipe_name
         self.payload = payload if payload.endswith(b"\n") else payload + b"\n"
         self._thread: Optional[threading.Thread] = None
+        self._ready_event = threading.Event()
         self._stop_event = threading.Event()
         self._security = _create_security_attributes()
 
     def start(self) -> None:
         if self._thread is not None:
             return
+        self._ready_event.clear()
         self._thread = threading.Thread(target=self._run, name="rmpsm-bootstrap-pipe", daemon=True)
         self._thread.start()
+        if not self._ready_event.wait(5.0):
+            raise TimeoutError("Named pipe server failed to start within 5 seconds")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -328,6 +332,7 @@ class NamedPipeBootstrapServer:
         try:
             while not self._stop_event.is_set():
                 h_pipe = self._create_instance()
+                self._ready_event.set()
                 connected = False
                 try:
                     ok = kernel32.ConnectNamedPipe(h_pipe, None)

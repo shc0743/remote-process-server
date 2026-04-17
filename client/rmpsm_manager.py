@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import ctypes
 import os
 import secrets
 import signal
@@ -33,10 +34,11 @@ from rmpsm_transport import safe_unlink
 
 
 class Manager:
-    def __init__(self, connection_file: str, server_path: str, stderr: str = "inherit"):
+    def __init__(self, connection_file: str, server_path: str, stderr: str = "inherit", signal: int = 0):
         self.connection_file = connection_file
         self.server_path = server_path
         self.stderr = stderr
+        self._signal = signal
         
         if os.name != "nt":
             self._base_dir = os.path.dirname(self.connection_file) or "."
@@ -52,11 +54,6 @@ class Manager:
         self._shutdown_started = False
         
         self.bridge = ServerBridge(self, server_path, stderr)
-        
-        try:
-            print('Server has been started', file=sys.stderr)
-        except BaseException:
-            pass
 
     def _new_session_id(self) -> str:
         with self._session_lock:
@@ -150,6 +147,19 @@ class Manager:
 
         accept_thread = threading.Thread(target=self._accept_clients, args=(server_socket, authkey), daemon=False)
         accept_thread.start()
+        
+        try:
+            print('Server has been started', file=sys.stderr)
+            if self._signal != 0:
+                if os.name == 'nt':
+                    s = ctypes.windll.kernel32.SetEvent
+                    s.argtypes = [ctypes.c_void_p]
+                    s(ctypes.c_void_p(self._signal))
+                else:
+                    value = 1
+                    os.write(self._signal, value.to_bytes(8, byteorder='little'))
+        except BaseException:
+            pass
 
         try:
             while not self.stop_event.is_set():

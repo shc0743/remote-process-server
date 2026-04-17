@@ -434,7 +434,7 @@ class ClientRuntime:
 
 def kill_manager(connection_file: str) -> int:
     try:
-        address, authkey = read_connection_info(connection_file, timeout=3.0)
+        address, authkey = read_connection_info(connection_file, timeout=0.5) # Kill request doesn't wait
     except Exception as e:
         print(f"Failed to read connection info: {e}", file=sys.stderr)
         return 1

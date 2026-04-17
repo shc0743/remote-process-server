@@ -25,6 +25,7 @@ def main() -> int:
         help="[Manager only] specify the server startup command"
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")
+    parser.add_argument("--signal", type=int, default=0, help="[Manager only] Specify a eventfd(POSIX) or hEvent(Windows) and it will be set when server is ready")
     parser.add_argument("--kill", action="store_true", help="[Client only] Kill the manager process")
     parser.add_argument("--cmd-syntax", action="store_true", help="[Client only][Windows only] Use CMD's quota syntax")
     args, remainder = parser.parse_known_args()
@@ -46,7 +47,7 @@ def main() -> int:
         if probe_connection_info(args.manager, timeout=1.0):
             print("Error: another manager with the same configuration is already running", file=sys.stderr)
             return 1
-        mgr = Manager(args.manager, args.server, args.stderr)
+        mgr = Manager(args.manager, args.server, args.stderr, args.signal)
         mgr.run()
         return 0
 
