@@ -35,18 +35,18 @@ def main() -> int:
 
     if args.kill and args.type == "manager":
         print("error: --kill can only be used with client mode", file=sys.stderr)
-        return 2
+        return 87
 
     if args.stderr != 'inherit' and args.type == "client":
         print("error: --stderr can only be used with manager mode", file=sys.stderr)
-        return 2
+        return 87
 
     if args.type == "manager":
         # Check if another manager with the same configuration is already running
         # by trying to read one bootstrap payload from the endpoint.
         if probe_connection_info(args.manager, timeout=1.0):
             print("Error: another manager with the same configuration is already running", file=sys.stderr)
-            return 1
+            return 17
         mgr = Manager(args.manager, args.server, args.stderr, args.signal)
         mgr.run()
         return 0
@@ -55,8 +55,8 @@ def main() -> int:
         return kill_manager(args.manager)
 
     if not remainder:
-        print("client mode requires a command after --\nuse --help to show help information", file=sys.stderr)
-        return 2
+        print("No input specified.", file=sys.stderr)
+        return 22
 
     client = ClientRuntime(args.manager, remainder, args.cmd_syntax)
     try:
