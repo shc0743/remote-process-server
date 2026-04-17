@@ -16,7 +16,6 @@ advapi32 = ctypes.WinDLL('advapi32.dll', use_last_error=True)
 GENERIC_READ = 0x80000000
 OPEN_EXISTING = 3
 PIPE_ACCESS_OUTBOUND = 0x00000002
-PIPE_ACCESS_DUPLEX = 0x00000003
 PIPE_TYPE_BYTE = 0x00000000
 PIPE_READMODE_BYTE = 0x00000000
 PIPE_WAIT = 0x00000000
@@ -113,31 +112,8 @@ INTEGRITY_RANK = {
     0x00003000: 4,  # High
     0x00004000: 5,  # System
     0x00005000: 6,  # Protected Process
+    0x00007000: 7,  # Secure Process
 }
-
-# =========================
-# Security helpers
-# =========================
-
-ImpersonateNamedPipeClient = advapi32.ImpersonateNamedPipeClient
-ImpersonateNamedPipeClient.argtypes = [wintypes.HANDLE]
-ImpersonateNamedPipeClient.restype = wintypes.BOOL
-
-RevertToSelf = advapi32.RevertToSelf
-RevertToSelf.argtypes = []
-RevertToSelf.restype = wintypes.BOOL
-
-OpenThreadToken = advapi32.OpenThreadToken
-OpenThreadToken.argtypes = [
-    wintypes.HANDLE,
-    wintypes.DWORD,
-    wintypes.BOOL,
-    ctypes.POINTER(wintypes.HANDLE),
-]
-OpenThreadToken.restype = wintypes.BOOL
-
-GetCurrentThread = kernel32.GetCurrentThread
-GetCurrentThread.restype = wintypes.HANDLE
 
 def _integrity_rank(rid: int) -> int:
     return INTEGRITY_RANK.get(rid, -1)
@@ -188,7 +164,6 @@ def _open_process_token(pid: int) -> wintypes.HANDLE:
 
     kernel32.CloseHandle(h_proc)
     return h_token
-
 
 def _open_current_process_token() -> wintypes.HANDLE:
     h_token = wintypes.HANDLE()
@@ -248,51 +223,25 @@ def _get_token_integrity(token) -> int:
 
 
 def _check_client_allowed(pipe_handle: wintypes.HANDLE) -> bool:
-    # 先拿服务器自己的 token，避免把这个步骤放进 impersonation 窗口里。
-    print('pipe_handle:',pipe_handle,file=sys.stderr)
+    client_pid = _get_client_pid(pipe_handle)
+
+    client_token = _open_process_token(client_pid)
     server_token = _open_current_process_token()
+
     try:
-        # 进入客户端身份；失败就直接拒绝。
-        if not ImpersonateNamedPipeClient(pipe_handle):
-            _raise_last_error("ImpersonateNamedPipeClient")
-        print('2',file=sys.stderr)
+        csid = _get_token_user_sid(client_token)
+        ssid = _get_token_user_sid(server_token)
+        if csid != ssid:
+            return False
 
-        client_token = wintypes.HANDLE()
-        try:
-            # 直接从当前线程拿客户端 token。
-            # OpenAsSelf=True 可兼容 Identification-level impersonation。
-            if not OpenThreadToken(
-                GetCurrentThread(),
-                TOKEN_QUERY,
-                True,
-                ctypes.byref(client_token),
-            ):
-                _raise_last_error("OpenThreadToken")
+        ci = _get_token_integrity(client_token)
+        si = _get_token_integrity(server_token)
+        if _integrity_rank(ci) < _integrity_rank(si):
+            return False
 
-            print('3',file=sys.stderr)
-            try:
-                csid = _get_token_user_sid(client_token)
-                ssid = _get_token_user_sid(server_token)
-                if csid != ssid:
-                    return False
-
-                ci = _get_token_integrity(client_token)
-                si = _get_token_integrity(server_token)
-                print('[DEBUG]ci',ci,'si',si,file=sys.stderr)
-                irci = _integrity_rank(ci)
-                irsi = _integrity_rank(si)
-                print('[DEBUG]irci',irci,'irsi',irsi,file=sys.stderr)
-                if irci < irsi:
-                    return False
-
-                return True
-            finally:
-                if client_token:
-                    kernel32.CloseHandle(client_token)
-        finally:
-            if not RevertToSelf():
-                _raise_last_error("RevertToSelf")
+        return True
     finally:
+        kernel32.CloseHandle(client_token)
         kernel32.CloseHandle(server_token)
 
 
@@ -360,7 +309,7 @@ class NamedPipeBootstrapServer:
             kernel32.CloseHandle(h)
 
     def _create_instance(self) -> wintypes.HANDLE:
-        flags = PIPE_ACCESS_DUPLEX
+        flags = PIPE_ACCESS_OUTBOUND
         h = kernel32.CreateNamedPipeW(
             self.pipe_name,
             flags,
@@ -396,11 +345,9 @@ class NamedPipeBootstrapServer:
                     if connected and not self._stop_event.is_set():
                         try:
                             if not _check_client_allowed(h_pipe):
-                                print('Notallowed',file=sys.stderr)
                                 kernel32.DisconnectNamedPipe(h_pipe)
                                 continue
                         except Exception:
-                            raise
                             kernel32.DisconnectNamedPipe(h_pipe)
                             continue
                     
