@@ -61,9 +61,12 @@ def main() -> int:
     try:
         return client.run()
     except BaseException as e:
-        print(e, file=sys.stderr)
-        import traceback
-        traceback.print_exc()
+        try:
+            print(e, file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+        except BaseException:
+            pass
         os._exit(-1)
 
 

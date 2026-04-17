@@ -16,6 +16,7 @@ advapi32 = ctypes.WinDLL('advapi32.dll', use_last_error=True)
 GENERIC_READ = 0x80000000
 OPEN_EXISTING = 3
 PIPE_ACCESS_OUTBOUND = 0x00000002
+PIPE_ACCESS_DUPLEX = 0x00000003
 PIPE_TYPE_BYTE = 0x00000000
 PIPE_READMODE_BYTE = 0x00000000
 PIPE_WAIT = 0x00000000
@@ -77,6 +78,8 @@ GetNamedPipeClientProcessId.restype = wintypes.BOOL
 OpenProcess = kernel32.OpenProcess
 OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
 OpenProcess.restype = wintypes.HANDLE
+GetCurrentProcess = kernel32.GetCurrentProcess
+GetCurrentProcess.restype = wintypes.HANDLE
 
 OpenProcessToken = advapi32.OpenProcessToken
 OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
@@ -94,6 +97,50 @@ TokenIntegrityLevel = 25
 advapi32.ConvertSidToStringSidW.argtypes = [LPVOID, ctypes.POINTER(LPCWSTR)]
 advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
 
+GetSidSubAuthorityCount = advapi32.GetSidSubAuthorityCount
+GetSidSubAuthorityCount.argtypes = [LPVOID]
+GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+
+GetSidSubAuthority = advapi32.GetSidSubAuthority
+GetSidSubAuthority.argtypes = [LPVOID, wintypes.DWORD]
+GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
+INTEGRITY_RANK = {
+    0x00000000: 0,  # Untrusted
+    0x00001000: 1,  # Low
+    0x00002000: 2,  # Medium
+    0x00002100: 3,  # Medium Plus
+    0x00003000: 4,  # High
+    0x00004000: 5,  # System
+    0x00005000: 6,  # Protected Process
+}
+
+# =========================
+# Security helpers
+# =========================
+
+ImpersonateNamedPipeClient = advapi32.ImpersonateNamedPipeClient
+ImpersonateNamedPipeClient.argtypes = [wintypes.HANDLE]
+ImpersonateNamedPipeClient.restype = wintypes.BOOL
+
+RevertToSelf = advapi32.RevertToSelf
+RevertToSelf.argtypes = []
+RevertToSelf.restype = wintypes.BOOL
+
+OpenThreadToken = advapi32.OpenThreadToken
+OpenThreadToken.argtypes = [
+    wintypes.HANDLE,
+    wintypes.DWORD,
+    wintypes.BOOL,
+    ctypes.POINTER(wintypes.HANDLE),
+]
+OpenThreadToken.restype = wintypes.BOOL
+
+GetCurrentThread = kernel32.GetCurrentThread
+GetCurrentThread.restype = wintypes.HANDLE
+
+def _integrity_rank(rid: int) -> int:
+    return INTEGRITY_RANK.get(rid, -1)
 
 def sid_to_string(sid_ptr):
     out = LPCWSTR()
@@ -143,6 +190,13 @@ def _open_process_token(pid: int) -> wintypes.HANDLE:
     return h_token
 
 
+def _open_current_process_token() -> wintypes.HANDLE:
+    h_token = wintypes.HANDLE()
+    if not OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, ctypes.byref(h_token)):
+        _raise_last_error("OpenProcessToken(current)")
+    return h_token
+
+
 class WinPipeError(OSError):
     pass
 
@@ -172,7 +226,7 @@ def _get_token_user_sid(token) -> str:
 
 
 def _get_token_integrity(token) -> int:
-    size = wintypes.DWORD()
+    size = wintypes.DWORD(0)
     GetTokenInformation(token, TokenIntegrityLevel, None, 0, ctypes.byref(size))
 
     buf = ctypes.create_string_buffer(size.value)
@@ -180,36 +234,65 @@ def _get_token_integrity(token) -> int:
         _raise_last_error("GetTokenInformation(TokenIntegrityLevel)")
 
     til = ctypes.cast(buf, ctypes.POINTER(TOKEN_MANDATORY_LABEL)).contents
-
-    # integrity level = RID (last sub-authority)
     sid = til.Label.Sid
-    subauth_count = ctypes.cast(sid, ctypes.POINTER(ctypes.c_ubyte))[1]
-    subauth_array = ctypes.cast(sid, ctypes.POINTER(ctypes.c_uint32))
-    return subauth_array[subauth_count]
+
+    if not sid:
+        raise WinPipeError(0, "NULL integrity SID")
+
+    count = GetSidSubAuthorityCount(sid)[0]
+    if count == 0:
+        raise WinPipeError(0, "Malformed integrity SID")
+
+    rid = GetSidSubAuthority(sid, count - 1)[0]
+    return int(rid)
 
 
 def _check_client_allowed(pipe_handle: wintypes.HANDLE) -> bool:
-    client_pid = _get_client_pid(pipe_handle)
-
-    client_token = _open_process_token(client_pid)
-    server_token = _open_process_token(os.getpid())
-
+    # 先拿服务器自己的 token，避免把这个步骤放进 impersonation 窗口里。
+    print('pipe_handle:',pipe_handle,file=sys.stderr)
+    server_token = _open_current_process_token()
     try:
-        csid = _get_token_user_sid(client_token)
-        ssid = _get_token_user_sid(server_token)
-        if csid != ssid:
-            #print('Security: Client with', csid, 'wants to connect', ssid, ', Denied', file=sys.stderr)
-            return False
+        # 进入客户端身份；失败就直接拒绝。
+        if not ImpersonateNamedPipeClient(pipe_handle):
+            _raise_last_error("ImpersonateNamedPipeClient")
+        print('2',file=sys.stderr)
 
-        ci = _get_token_integrity(client_token)
-        si = _get_token_integrity(server_token)
-        if ci < si:
-            #print('Security: Client with integrity', ci, 'wants to connect', si, ', Denied', file=sys.stderr)
-            return False
+        client_token = wintypes.HANDLE()
+        try:
+            # 直接从当前线程拿客户端 token。
+            # OpenAsSelf=True 可兼容 Identification-level impersonation。
+            if not OpenThreadToken(
+                GetCurrentThread(),
+                TOKEN_QUERY,
+                True,
+                ctypes.byref(client_token),
+            ):
+                _raise_last_error("OpenThreadToken")
 
-        return True
+            print('3',file=sys.stderr)
+            try:
+                csid = _get_token_user_sid(client_token)
+                ssid = _get_token_user_sid(server_token)
+                if csid != ssid:
+                    return False
+
+                ci = _get_token_integrity(client_token)
+                si = _get_token_integrity(server_token)
+                print('[DEBUG]ci',ci,'si',si,file=sys.stderr)
+                irci = _integrity_rank(ci)
+                irsi = _integrity_rank(si)
+                print('[DEBUG]irci',irci,'irsi',irsi,file=sys.stderr)
+                if irci < irsi:
+                    return False
+
+                return True
+            finally:
+                if client_token:
+                    kernel32.CloseHandle(client_token)
+        finally:
+            if not RevertToSelf():
+                _raise_last_error("RevertToSelf")
     finally:
-        kernel32.CloseHandle(client_token)
         kernel32.CloseHandle(server_token)
 
 
@@ -277,7 +360,7 @@ class NamedPipeBootstrapServer:
             kernel32.CloseHandle(h)
 
     def _create_instance(self) -> wintypes.HANDLE:
-        flags = PIPE_ACCESS_OUTBOUND
+        flags = PIPE_ACCESS_DUPLEX
         h = kernel32.CreateNamedPipeW(
             self.pipe_name,
             flags,
@@ -313,9 +396,11 @@ class NamedPipeBootstrapServer:
                     if connected and not self._stop_event.is_set():
                         try:
                             if not _check_client_allowed(h_pipe):
+                                print('Notallowed',file=sys.stderr)
                                 kernel32.DisconnectNamedPipe(h_pipe)
                                 continue
                         except Exception:
+                            raise
                             kernel32.DisconnectNamedPipe(h_pipe)
                             continue
                     
@@ -333,9 +418,13 @@ class NamedPipeBootstrapServer:
                         kernel32.CloseHandle(h_pipe)
                     except Exception:
                         pass
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        except BaseException as e:
+            try:
+                print(e, file=sys.stderr)
+                import traceback
+                traceback.print_exc()
+            except BaseException:
+                pass
             try:
                 self._stop_event.set()
             except BaseException:

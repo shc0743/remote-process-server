@@ -34,7 +34,7 @@ def fetch_runs():
         data = json.load(resp)
     return data.get("workflow_runs", [])
 
-for _ in range(60):
+for _ in range(15):
     runs = fetch_runs()
     for run in runs:
         if run.get("conclusion") == "success":

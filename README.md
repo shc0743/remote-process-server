@@ -1,26 +1,6 @@
 # remote-process-server
 
-[![npm version](https://img.shields.io/npm/v/remote-process-server.svg)](https://www.npmjs.com/package/remote-process-server)
-[![license](https://img.shields.io/npm/l/remote-process-server.svg)](LICENSE)
-
-A client/server system for creating and managing processes over a framed process-control protocol over a trusted byte stream.
-
-`remote-process-server` v3 is still not stable. The main goal is to keep the server side small, dependency-free, and easy to launch in unusual environments.
-
-## Table of contents
-
-- [What it is](#what-it-is)
-- [Why it exists](#why-it-exists)
-- [How it is structured](#how-it-is-structured)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Typical launch patterns](#typical-launch-patterns)
-- [Commands](#commands)
-- [Server binary export](#server-binary-export)
-- [Platform notes](#platform-notes)
-- [Security notes](#security-notes)
-- [Development](#development)
-- [License](#license)
+A client/server system for creating and managing processes over a framed process-control protocol over a trusted byte stream. The main goal is to keep the server side small, dependency-free, and easy to launch in unusual environments.
 
 ## What it is
 

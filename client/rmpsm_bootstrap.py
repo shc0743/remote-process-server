@@ -184,7 +184,7 @@ def close_connection_info(path: str) -> None:
         pass
 
 
-def read_connection_info(path: str, timeout: float = 5.0) -> Tuple[Tuple[str, int], bytes]:
+def read_connection_info(path: str, timeout: float = 1.0) -> Tuple[Tuple[str, int], bytes]:
     if os.name == 'nt':
         from rmpsm_winpipe import read_named_pipe_line
         payload = read_named_pipe_line(path, timeout=timeout)
