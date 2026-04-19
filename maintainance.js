@@ -191,6 +191,7 @@ function writeLauncherFiles(installRoot) {
     mkdirSync(installRoot, { recursive: true });
     writeFileSync(join(installRoot, 'remote-process-server.js'), makeRuntimeLauncherJs(), 'utf-8');
     writeFileSync(join(installRoot, 'entry.js'), makeCompatibilityEntryJs(), 'utf-8');
+    writeFileSync(join(installRoot, 'package.json'), JSON.stringify({ type: 'module' }), 'utf-8');
 
     const wrapperPath = IS_WINDOWS
         ? join(installRoot, 'remote-process-server.cmd')
