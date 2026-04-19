@@ -26,11 +26,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-          compile.cmd
-          cd native\bin\
-          dir /b
-          copy * ..\..\
-          dir /b ..\..\
+          .scripts\compile-windows.cmd
 
       - name: Run tests
         shell: cmd
