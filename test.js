@@ -17,7 +17,7 @@ const lib = (() => {
 console.log('Killing old instances, please wait...');
 try { execSync('node entry.js kill', { stdio: 'ignore' }) } catch {} // kill old processes to avoid conflict
 console.log('Creating event, please wait...');
-const hEvent = (() => {
+const hEvent = (() => { try {
     if (!ISWINDOWS) {
         const eventfd = lib.func('eventfd', 'int', ['uint32', 'int']);
         const fd = eventfd(0, 0);
@@ -39,9 +39,10 @@ const hEvent = (() => {
     const h = CreateEventW(sa, false, false, null);
     if (!h) throw new Error(`CreateEventW failed`);
     return (h);
-})();
+} catch (e) { console.error(e); process.abort() } })();
 console.log('Running server, please wait...');
 const server = { process: spawn('node', ['entry.js', 'daemon', '--signal=' + String(ISWINDOWS ? koffi.address(hEvent) : hEvent)], { stdio: 'inherit' }), output: 'DEPRECATED' };
+server.process.on('exit', code => (!server.done) && (process.kill(process.pid, (console.error('Fatal: Server exited accidently with', code), code, 'SIGKILL')), process.abort()));
 // Wait for the server to be ready
 try { if (ISWINDOWS) {
     const WaitForSingleObject = lib.func('WaitForSingleObject', 'uint32', ['void*', 'uint32']);
@@ -64,7 +65,7 @@ try { if (ISWINDOWS) {
             }
         });
     });
-} } catch (e) { console.error(e); process.exit(1) }
+} } catch (e) { console.error(e); process.abort() }
 console.log('√ Server is ready now!!');
 
 // 1. test basic command
@@ -112,6 +113,7 @@ if (process.env.CI === 'true' && ISWINDOWS) {
     execSync('node entry.js uninstall', { stdio: 'inherit' });
     console.log('native module test');
     execSync('node entry.js install "C:\\Program Files\\test"', { stdio: 'inherit' });
+    server.done = true;
     execSync('node entry.js kill', { stdio: 'inherit' });
     server.process = spawn('cmd', ['/D', '/C', '""C:\\Program Files\\test\\remote-process-server.cmd" daemon"'], { stdio: 'inherit', windowsVerbatimArguments: true, shell: false });
     await new Promise(r => setTimeout(r, 3000));
@@ -121,5 +123,6 @@ if (process.env.CI === 'true' && ISWINDOWS) {
 }
 
 // cleanup
+server.done = true;
 execSync('node entry.js kill');
 

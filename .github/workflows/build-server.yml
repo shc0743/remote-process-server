@@ -27,7 +27,10 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           compile.cmd
-          move native\bin\* .
+          cd native\bin\
+          dir /b
+          copy * ..\..\
+          dir /b ..\..\
 
       - name: Run tests
         shell: cmd
@@ -61,7 +64,7 @@ jobs:
       - name: Compile
         run: |
           ./compile.sh
-          mv native/bin/* .
+          cp native/bin/* .
 
       - name: Run tests
         run: |
@@ -94,7 +97,7 @@ jobs:
       - name: Compile
         run: |
           ./compile.sh android_aarch64 $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang++ $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
-          mv native/bin/* .
+          cp native/bin/* .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
