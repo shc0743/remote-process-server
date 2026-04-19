@@ -780,6 +780,53 @@ function printUninstallResult(result) {
 
 function main(argv = process.argv.slice(2)) {
     const [command = '', ...rest] = argv;
+    
+    if (rest[0] === '-h' || rest[0] === '--help') {
+        switch (command) {
+            case 'install':
+            case 'update':
+                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js ${command} [InstallationDestination]
+
+\x1b[1;4mDescription:\x1b[0m
+  Install or update the application to the specified directory.
+  If no InstallationDestination is provided, the default install root is used.
+
+\x1b[1;4mDefault install root:\x1b[0m
+  Windows: %ProgramFiles%\\${PRODUCT_NAME}
+  Other:   /opt/${PRODUCT_NAME}`);
+                break;
+            case 'uninstall':
+                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js uninstall [InstallationDestination]
+
+\x1b[1;4mDescription:\x1b[0m
+  Remove an installed copy of ${PRODUCT_NAME}.
+  If no InstallationDestination is provided, the command will try to infer the install
+  root from the current module location, or fall back to the default install root.`);
+                break;
+            case 'where':
+                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js where [InstallationDestination]
+
+\x1b[1;4mDescription:\x1b[0m
+  Print the normalized install root path.
+  If a InstallationDestination is given, it is normalized and printed.
+  Otherwise, the default install root is printed.`);
+                break;
+            default:
+                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js <command> [options]
+
+\x1b[1;4mCommands:\x1b[0m
+  install [path]   Install or update the application to the specified directory
+  update [path]    Alias for install
+  uninstall [path] Uninstall the application from the specified directory
+  where [path]     Print the normalized install root path
+
+\x1b[1;4mOptions:\x1b[0m
+  -h, --help       Show this help message`);
+        }
+        return;
+    }
+    
+    if (rest.length > 1) throw new TypeError('Too many arguments');
 
     switch (command) {
         case 'install':

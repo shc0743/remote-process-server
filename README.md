@@ -80,29 +80,29 @@ remote-process-server uninstall
 
 ## Detailed installation guide
 
-### npx installation
+### npm/npx installation
 
 Install directly via `npx` without a global install:
 
 ```bash
-npx remote-process-server@latest install
+npx remote-process-server@latest install [Destination]
 ```
 
-### Alternative installation
-
-Install the CLI wrapper globally to the user's package directory:
+Or install the CLI wrapper globally to the user's package directory:
 
 ```bash
 npm install -g remote-process-server
 ```
 
-Then install the runtime: (optional but highly recommended)
+### Windows installation
+
+If you are using Windows, it's then strongly recommended to install the runtime to the system's Program Files directory so that low-permission processes will be unable to tamper with the runtime code:
 
 ```bash
 remote-process-server install
 ```
 
-Specify a custom installation path:
+You can also specify a custom installation path:
 
 ```bash
 remote-process-server install /path/to/remote-process-server

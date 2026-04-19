@@ -94,8 +94,16 @@ expect(4.1, ISWINDOWS ? 'node entry.js run --cmd-syntax -- cmd /d /S /c chcp 650
 fs.unlinkSync('中文 space/test.txt');
 fs.rmdirSync('中文 space');
 
+// 5. test installation and uninstallation (only in CI environment)
+if (process.env.CI === 'true') {
+    execSync('node entry.js install', { stdio: 'inherit' });
+    execSync('node entry.js uninstall', { stdio: 'inherit' });
+} else {
+    console.log('Not in CI environment (might have permission problem), skip installation test.');
+}
+
 // -- Windows specific tests
-if (ISWINDOWS) {
+if (process.env.CI === 'true' && ISWINDOWS) {
     console.info('Windows detected, running Windows specific tests...');
 
     console.log('install test');
