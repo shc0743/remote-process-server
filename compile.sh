@@ -20,3 +20,5 @@ else
     $COMPILER -std=c++20 -O3 -flto -static -static-libstdc++ -static-libgcc server.cpp -I. -o "rmpsm_server.$SYS_NAME" || exit 1
 fi
 $STRIPPER "rmpsm_server.$SYS_NAME"
+mkdir -p native/bin/
+mv "rmpsm_server.$SYS_NAME" native/bin/

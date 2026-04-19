@@ -279,7 +279,7 @@ function tryLoadWindowsRebootDeleteAddon() {
     if (!IS_WINDOWS) return null;
 
     try {
-        return require('./native/delayed_delete.windows_amd64.node');
+        return require('./native/node/delayed_delete.windows_amd64.node');
     } catch {
         return null;
     }
@@ -769,11 +769,11 @@ function printUninstallResult(result) {
 
     if (result.remainingEntries?.length) {
         console.log(
-            `Removed generated installation files from ${result.installRoot}, but kept the directory because it still contains: ${result.remainingEntries.join(', ')}`
+            `Removed generated installation files from ${result.installRoot}, but the installation directory was not automatically removed because it still contains ${result.remainingEntries.length} entries. Please remove it manually if you need.`
         );
     } else {
         console.log(
-            `Removed generated installation files from ${result.installRoot}, but the directory could not be removed immediately`
+            `Removed generated installation files from ${result.installRoot}, but the installation directory could not be removed immediately. Please remove it manually if you need.`
         );
     }
 }

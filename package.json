@@ -1,6 +1,6 @@
 {
   "name": "remote-process-server",
-  "version": "3.1.0-rc.3",
+  "version": "3.1.0-rc.4",
   "description": "A client/server system for remotely creating and managing processes",
   "bin": {
     "remote-process-server": "entry.min.js"
@@ -39,8 +39,7 @@
     "server/**/*",
     "compile.*",
     "sys_name.py",
-    "native/**/*",
-    "rmpsm_server.*"
+    "native/**/*"
   ],
   "scripts": {
     "postinstall": "node postinstall.js",

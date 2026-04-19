@@ -144,7 +144,7 @@ The actual runtime lives under the installation root in versioned subdirectories
 ### Local binary
 
 ```bash
-remote-process-server daemon --server ./rmpsm_server.linux_x86_64
+remote-process-server daemon --server ./rmpsm_server.linux_x86_64 # Use a downloaded binary
 ```
 
 ### SSH launch

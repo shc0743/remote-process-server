@@ -56,9 +56,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          find server-artifacts -type f -name 'rmpsm_server.*' -exec cp -f {} . \;
-          chmod +x rmpsm_server.* 2>/dev/null || true
-          ls -l rmpsm_server.* || true
+          mkdir -p ./native/bin/
+          find server-artifacts -type f -name 'rmpsm_server.*' -exec cp -f {} ./native/bin/ \;
+          chmod +x native/bin/rmpsm_server.* 2>/dev/null || true
+          ls -l native/bin/rmpsm_server.* || true
 
       - name: Install dependencies
         run: npm ci || npm i
