@@ -1,0 +1,24 @@
+{
+  "name": "remote-process-server",
+  "version": "0.0.0-feat-delayed-deletion.1-impl.1",
+  "description": "The delayed deletion native module for Windows",
+  "homepage": "https://github.com/shc0743/remote-process-server#readme",
+  "bugs": {
+    "url": "https://github.com/shc0743/remote-process-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shc0743/remote-process-server.git"
+  },
+  "license": "MIT",
+  "author": "",
+  "type": "module",
+  "scripts": {
+    "build:native": "node-gyp rebuild",
+    "build": "node-gyp rebuild"
+  },
+  "devDependencies": {
+    "node-addon-api": "^8.7.0",
+    "node-gyp": "^12.2.0"
+  }
+}
