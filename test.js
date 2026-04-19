@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { spawn, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import koffi from 'koffi';
@@ -92,6 +93,24 @@ fs.writeFileSync('中文 space/test.txt', '中文Content');
 expect(4.1, ISWINDOWS ? 'node entry.js run --cmd-syntax -- cmd /d /S /c chcp 65001 >NUL 2>&1 & type "中文 space\\test.txt"' : 'cat "中文 space/test.txt"', '中文Content');
 fs.unlinkSync('中文 space/test.txt');
 fs.rmdirSync('中文 space');
+
+// -- Windows specific tests
+if (ISWINDOWS) {
+    console.info('Windows detected, running Windows specific tests...');
+
+    console.log('install test');
+    execSync('node entry.js install');
+    console.log('uninstall test');
+    execSync('node entry.js uninstall');
+    console.log('native module test');
+    execSync('node entry.js install "C:\\Program Files\\test"');
+    execSync('node entry.js kill');
+    server.process = spawn('cmd', ['/D', '/S', '/C', '"C:\\Program Files\\test\\remote-process-server.cmd"', 'daemon']);
+    await new Promise(r => setTimeout(r, 1000));
+    execSync('node entry.js uninstall "C:\\Program Files\\test"');
+    await new Promise(r => setTimeout(r, 1000));
+    console.log(execSync('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager" /v PendingFileRenameOperations'));
+}
 
 // cleanup
 execSync('node entry.js kill');

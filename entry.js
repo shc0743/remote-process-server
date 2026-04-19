@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, join, basename } from 'path';
+import { dirname, join } from 'path';
 import { readdirSync, copyFileSync, existsSync, readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -57,6 +57,16 @@ function runPythonClient(args, headless = false) {
     child.on('exit', (code) => process.exit(code));
 }
 
+async function runMaintenance(command, restArgs) {
+    const { main } = await import('./maintainance.js');
+    try {
+        main([command, ...restArgs]);
+    } catch (err) {
+        console.error(err?.message || err);
+        process.exit(1);
+    }
+}
+
 const action = process.argv[2];
 const restArgs = process.argv.slice(3);
 
@@ -89,6 +99,13 @@ switch (action) {
         runPythonClient(['--help', ...restArgs]);
         break;
 
+    case 'install':
+    case 'uninstall':
+    case 'update':
+    case 'where':
+        await runMaintenance(action, restArgs);
+        break;
+
     case 'list-arch':
         console.log(getSupportedArchs().join('\n'));
         break;
@@ -109,16 +126,12 @@ switch (action) {
         console.log(PKG.version);
         break;
 
-    // case 'start':
-    // 'start' sounds too similar to 'stop' but they are very different
-    // to avoid confusion we remove the 'start' action
     case 'run-server':
         process.chdir(__dirname);
         runServerBinary(getCurrentArch(), restArgs);
         break;
 
     case 'copy-server': {
-        // usage: copy-server <target_filename> [arch]
         if (restArgs.length < 1) {
             console.error('Usage: copy-server <target_filename> [arch]');
             process.exit(1);
@@ -130,7 +143,7 @@ switch (action) {
             copyFileSync(sourcePath, targetPath);
             console.log(`Copied ${arch} server binary to ${targetPath}`);
         } catch (err) {
-            throw err
+            throw err;
         }
         break;
     }
@@ -154,6 +167,11 @@ switch (action) {
   run-server   Run the server; this is not the manager daemon
   copy-server  Copy the server binary to the specified path. Usage: copy-server <target_filename> [arch]; Default to current arch; fails if the specified arch is not found
   list-arch    List the currently supported architectures
+\x1b[1mInstallation commands\x1b[0m
+  install      Copy the package into a installation directory. Usage: install [InstallationDestination]
+  update       Install to the target directory and replace the active version. Usage: update [InstallationDestination]
+  uninstall    Remove an installed copy. Usage: uninstall [InstallationDestination]
+  where        Show the target installation directory
 \x1b[1mOther commands\x1b[0m
   arch         Show the current architecture
   is-supported Return whether the current architecture is in the supported architectures list
