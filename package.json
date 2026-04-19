@@ -13,6 +13,12 @@
   "license": "MIT",
   "author": "",
   "type": "module",
+  "files": [
+    ".github/**/*",
+    "binding.gyp",
+    "delayed_delete.cc",
+    "build/**/*"
+  ],
   "scripts": {
     "build:native": "node-gyp rebuild",
     "build": "node-gyp rebuild"

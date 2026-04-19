@@ -1,8 +1,13 @@
-name: Build delayed deletion module for Windows
+name: Build delayed deletion module for Windows ana publish
 
 on:
   push:
     branches: [ delayed-deletion ]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
 
 jobs:
   build-windows:
@@ -29,3 +34,8 @@ jobs:
           name: delayed_delete-win64-node24
           path: build/Release/delayed_delete.node
           if-no-files-found: error
+
+      - name: Publish to npm with provenance
+        shell: bash
+        run: |
+          npm publish --provenance --tag "internal-feat-delayed-deletion"

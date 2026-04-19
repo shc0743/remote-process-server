@@ -11,9 +11,7 @@
       "dependencies": [
         "<!(node -p \"require('node-addon-api').targets\"):node_addon_api"
       ],
-      "defines": [
-        "NAPI_DISABLE_CPP_EXCEPTIONS"
-      ]
+      "defines": []
     }
   ]
 }

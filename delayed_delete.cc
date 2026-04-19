@@ -112,12 +112,12 @@ static Napi::Value ScheduleDeleteOnReboot(const Napi::CallbackInfo& info) {
   }
 
   std::error_code ec;
-  fs::path root = fs::u8path(inputUtf8);
+  fs::path root = fs::path(inputUtf8);
   root = fs::absolute(root, ec);
   if (ec) {
     // absolute 失败也不致命，继续用原路径
     ec.clear();
-    root = fs::u8path(inputUtf8);
+    root = fs::path(inputUtf8);
   }
 
   if (!fs::exists(root, ec) || ec) {
