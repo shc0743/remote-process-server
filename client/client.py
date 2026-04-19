@@ -79,9 +79,9 @@ def main() -> int:
         return -1
     except BaseException as e:
         try:
-            print(e, file=sys.stderr)
             import traceback
-            traceback.print_exc()
+            traceback_str = traceback.format_exc()
+            print(traceback_str, file=sys.stderr)
         except BaseException:
             pass
         os._exit(-1)

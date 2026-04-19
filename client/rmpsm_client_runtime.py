@@ -44,6 +44,7 @@ from rmpsm_protocol import (
     pack_task_io_request,
     read_connection_info,
 )
+from rmpsm_errors import ManagerNotRunningError, ConnectionRefusedError
 
 class ClientRuntime:
     def __init__(self, connection_file: str, cmd_argv: List[str], useCmdSyntax: bool):
@@ -313,9 +314,12 @@ class ClientRuntime:
                 self._reader_thread.start()
                 return
 
-            except FileNotFoundError as e:
-                raise e
-                last_error = e
+            except FileNotFoundError:
+                raise
+            except ConnectionRefusedError:
+                raise
+            except ManagerNotRunningError:
+                raise
             except Exception as e:
                 last_error = e
                 if sock is not None:
