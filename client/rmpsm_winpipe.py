@@ -9,6 +9,7 @@ import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Optional
+from rmpsm_errors import ManagerNotRunningError, ConnectionRefusedError
 
 kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
 advapi32 = ctypes.WinDLL('advapi32.dll', use_last_error=True)
@@ -429,11 +430,11 @@ def read_named_pipe_line(pipe_name: str, timeout: float = 5.0) -> bytes:
                     _raise_last_error("WaitNamedPipeW")
             continue
         if err == ERROR_FILE_NOT_FOUND:
-            raise FileNotFoundError(f"bootstrap pipe not found: {pipe_name}")
+            raise ManagerNotRunningError("manager is not running")
         if err == 233:
-            raise FileNotFoundError(f"bootstrap pipe was force closed by the peer: {pipe_name}")
+            raise ConnectionRefusedError("Connection is refused by manager. Please check whether you have enough permissions.")
         if err == 5:
-            raise FileNotFoundError(f"Access denied: {pipe_name}")
+            raise ConnectionRefusedError("Access denied.")
         if deadline is not None and time.monotonic() >= deadline:
             raise TimeoutError(f"bootstrap pipe not ready: {pipe_name}")
         time.sleep(0.05)
@@ -448,7 +449,7 @@ def read_named_pipe_line(pipe_name: str, timeout: float = 5.0) -> bytes:
                 if err == ERROR_BROKEN_PIPE:
                     break
                 if err == 233:
-                    raise FileNotFoundError(f"bootstrap pipe was force closed by the peer")
+                    raise ConnectionRefusedError("Connection was force closed by the peer. Please check whether you have enough permissions.")
                 _raise_last_error("ReadFile")
             if read.value == 0:
                 break

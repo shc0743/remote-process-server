@@ -8,6 +8,7 @@ import sys
 
 from rmpsm_protocol import default_connection_file, probe_connection_info
 from rmpsm_runtime import ClientRuntime, Manager, kill_manager
+from rmpsm_errors import ManagerNotRunningError, ConnectionRefusedError
 
 
 def main() -> int:
@@ -61,6 +62,21 @@ def main() -> int:
     client = ClientRuntime(args.manager, remainder, args.cmd_syntax)
     try:
         return client.run()
+    except ManagerNotRunningError as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+    except ConnectionRefusedError as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 5
+    except TimeoutError as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    except RuntimeError as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return -1
+    except OSError as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return -1
     except BaseException as e:
         try:
             print(e, file=sys.stderr)

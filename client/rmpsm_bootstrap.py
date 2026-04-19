@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Dict, Optional, Tuple
 
+from rmpsm_errors import ManagerNotRunningError
 from rmpsm_transport import safe_unlink
 
 if os.name == 'nt':
@@ -103,7 +104,9 @@ def _posix_read_line(path: str, timeout: float) -> bytes:
             fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
             break
         except OSError as e:
-            if e.errno in (errno.ENOENT, errno.ENXIO, errno.EAGAIN, errno.EWOULDBLOCK):
+            if e.errno in (errno.ENOENT, errno.ENXIO):
+                raise ManagerNotRunningError(f"manager is not running")
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
                 if deadline is not None and time.monotonic() >= deadline:
                     raise TimeoutError(f"bootstrap endpoint not ready: {path}")
                 time.sleep(0.05)
@@ -189,6 +192,8 @@ def read_connection_info(path: str, timeout: float = 1.0) -> Tuple[Tuple[str, in
         from rmpsm_winpipe import read_named_pipe_line
         payload = read_named_pipe_line(path, timeout=timeout)
     else:
+        if not os.path.exists(path):
+            raise ManagerNotRunningError(f"manager is not running")
         payload = _posix_read_line(path, timeout=timeout)
     return _decode_connection_info(payload)
 

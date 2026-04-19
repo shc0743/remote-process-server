@@ -236,8 +236,16 @@ inline bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
         close(outpipe[0]);
         close(errpipe[0]);
 
-        if (dup2(inpipe[0], STDIN_FILENO) == -1) _exit(126);
-        if (dup2(outpipe[1], STDOUT_FILENO) == -1) _exit(126);
+        if (dup2(inpipe[0], STDIN_FILENO) == -1) {
+            const char* msg = "error: dup2 stdin failed\n";
+            write(errpipe[1], msg, strlen(msg));
+            _exit(126);
+        }
+        if (dup2(outpipe[1], STDOUT_FILENO) == -1) {
+            const char* msg = "error: dup2 stdout failed\n";
+            write(errpipe[1], msg, strlen(msg));
+            _exit(126);
+        }
         if (dup2(errpipe[1], STDERR_FILENO) == -1) _exit(126);
 
         close(inpipe[0]);
@@ -245,6 +253,28 @@ inline bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
         close(errpipe[1]);
 
         execvp(argv[0], argv.data());
+        int exec_errno = errno;
+        const char* err_msg = nullptr;
+        switch (exec_errno) {
+            case ENOENT:
+                err_msg = "error: command not found: ";
+                break;
+            case EACCES:
+                err_msg = "error: permission denied: ";
+                break;
+            case EISDIR:
+                err_msg = "error: is a directory: ";
+                break;
+            case ENOEXEC:
+                err_msg = "error: exec format error: ";
+                break;
+            default:
+                err_msg = "error: failed to execute: ";
+                break;
+        }
+        write(STDERR_FILENO, err_msg, strlen(err_msg));
+        write(STDERR_FILENO, argv[0], strlen(argv[0]));
+        write(STDERR_FILENO, "\n", 1);
         _exit(127);
     }
 

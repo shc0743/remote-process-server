@@ -247,7 +247,7 @@ class ClientRuntime:
         # POSIX 上 bootstrap 载体是普通文件。文件都不存在，就说明 manager 根本没启动，
         # 这时不应该进入“等它慢慢起来”的重试逻辑。
         if os.name != "nt" and not os.path.exists(self.connection_file):
-            raise FileNotFoundError(f"manager is not running: {self.connection_file}")
+            raise FileNotFoundError(f"manager is not running")
 
         while time.monotonic() < startup_deadline and not self.stop_event.is_set():
             sock: Optional[socket.socket] = None
