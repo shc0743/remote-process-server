@@ -11,7 +11,7 @@ const PKG = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
 const ISWINDOWS = process.platform === 'win32';
 
 function getSupportedArchs() {
-    const files = readdirSync(__dirname);
+    const files = readdirSync(join(join(__dirname, 'native'), 'bin'));
     const archs = [];
     const prefix = 'rmpsm_server.';
     for (const file of files) {
@@ -38,7 +38,7 @@ function getCurrentArch() {
 
 function getServerBinaryPath(arch) {
     const binaryName = `rmpsm_server.${arch}`;
-    const binaryPath = join(__dirname, binaryName);
+    const binaryPath = join(join(join(__dirname, 'native'), 'bin'), binaryName);
     if (!existsSync(binaryPath)) {
         console.error(`Error: Server binary for architecture "${arch}" not found.`);
         process.exit(1);

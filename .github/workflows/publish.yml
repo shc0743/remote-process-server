@@ -59,6 +59,8 @@ jobs:
           mkdir -p ./native/bin/
           find server-artifacts -type f -name 'rmpsm_server.*' -exec cp -f {} ./native/bin/ \;
           chmod +x native/bin/rmpsm_server.* 2>/dev/null || true
+          chmod +x entry.* 2>/dev/null || true
+          chmod +x maintainance.* 2>/dev/null || true
           ls -l native/bin/rmpsm_server.* || true
 
       - name: Install dependencies
