@@ -110,7 +110,7 @@ export function removeTreeBestEffort(pathname) {
 
     if (!existsSync(pathname)) return;
 
-    const addon = require('native/delayed_delete.windows_amd64.node');
+    const addon = require('./native/delayed_delete.windows_amd64.node');
     if (!addon || typeof addon.scheduleDeleteOnReboot !== "function") {
         console.warn(`Warning: Windows native addon not available, cannot schedule reboot delete for ${pathname}`);
         return;

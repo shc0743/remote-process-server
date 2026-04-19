@@ -66,7 +66,7 @@ jobs:
       - name: Test
         run: npm test --if-present
 
-      - name: Build JS wrapper
+      - name: Build to optimize performance
         run: npm run build --if-present
 
       - name: Publish to npm with provenance

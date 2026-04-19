@@ -109,7 +109,7 @@ if (ISWINDOWS) {
     await new Promise(r => setTimeout(r, 1000));
     execSync('node entry.js uninstall "C:\\Program Files\\test"');
     await new Promise(r => setTimeout(r, 1000));
-    console.log(execSync('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager" /v PendingFileRenameOperations'));
+    console.log(execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager" /v PendingFileRenameOperations'));
 }
 
 // cleanup

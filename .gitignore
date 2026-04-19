@@ -6,3 +6,4 @@ dev-custom
 __pycache__
 node_modules
 .vs
+dist

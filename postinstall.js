@@ -5,6 +5,6 @@ const expectContent = `#pragma once
 #define SERVER_VERSION "${version}"
 
 `;
-const actualContent = await readFile('server_version.h', { encoding: 'utf-8' });
+const actualContent = await (async () => { try { return await readFile('server_version.h', { encoding: 'utf-8' }) } catch {} })();
 if (expectContent !== actualContent) await writeFile('server_version.h', expectContent);
 
