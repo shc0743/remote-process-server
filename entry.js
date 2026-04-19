@@ -58,7 +58,7 @@ function runPythonClient(args, headless = false) {
 }
 
 async function runMaintenance(command, restArgs) {
-    const { main } = await import('./maintainance.js');
+    const { main } = await import('./maintainance' + (__filename.endsWith('.min.js') ? '.min.js' : '.js'));
     try {
         main([command, ...restArgs]);
     } catch (err) {

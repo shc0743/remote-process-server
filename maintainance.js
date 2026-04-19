@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync, renameSync } from 'fs';
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -10,6 +11,8 @@ const PKG = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
 const PRODUCT_NAME = PKG.name || 'remote-process-server';
 const CURRENT_VERSION = PKG.version;
 const IS_WINDOWS = process.platform === 'win32';
+
+const require = createRequire(import.meta.url);
 
 function getWindowsProgramFilesDir() {
     if (!IS_WINDOWS) return null;
@@ -105,7 +108,7 @@ export function removeTreeBestEffort(pathname) {
     try {
         rmSync(pathname, { recursive: true, force: true, maxRetries: 0 });
     } catch (err) {
-        console.warn(`Warning: initial remove failed for ${pathname}`, err);
+        console.warn(`Warning: initial remove failed for ${pathname}: ${err}`);
     }
 
     if (!existsSync(pathname)) return;

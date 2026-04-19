@@ -7,3 +7,5 @@ __pycache__
 node_modules
 .vs
 dist
+entry.min.js
+maintainance.min.js

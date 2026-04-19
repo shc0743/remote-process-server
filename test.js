@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, execSync, spawnSync } from 'child_process';
+import { exec, spawn, execSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import koffi from 'koffi';
 //#region lib
@@ -99,17 +99,17 @@ if (ISWINDOWS) {
     console.info('Windows detected, running Windows specific tests...');
 
     console.log('install test');
-    execSync('node entry.js install');
+    execSync('node entry.js install', { stdio: 'inherit' });
     console.log('uninstall test');
-    execSync('node entry.js uninstall');
+    execSync('node entry.js uninstall', { stdio: 'inherit' });
     console.log('native module test');
-    execSync('node entry.js install "C:\\Program Files\\test"');
-    execSync('node entry.js kill');
-    server.process = spawn('cmd', ['/D', '/S', '/C', '"C:\\Program Files\\test\\remote-process-server.cmd"', 'daemon']);
+    execSync('node entry.js install "C:\\Program Files\\test"', { stdio: 'inherit' });
+    execSync('node entry.js kill', { stdio: 'inherit' });
+    server.process = spawn('cmd', ['/D', '/C', '""C:\\Program Files\\test\\remote-process-server.cmd" daemon"'], { stdio: 'inherit', windowsVerbatimArguments: true, shell: false });
+    await new Promise(r => setTimeout(r, 3000));
+    execSync('node entry.js uninstall "C:\\Program Files\\test"', { stdio: 'inherit' });
     await new Promise(r => setTimeout(r, 1000));
-    execSync('node entry.js uninstall "C:\\Program Files\\test"');
-    await new Promise(r => setTimeout(r, 1000));
-    console.log(execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager" /v PendingFileRenameOperations'));
+    execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager" /v PendingFileRenameOperations', { stdio: 'inherit' });
 }
 
 // cleanup

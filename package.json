@@ -3,7 +3,7 @@
   "version": "3.1.0-beta.1",
   "description": "A client/server system for remotely creating and managing processes",
   "bin": {
-    "remote-process-server": "dist/entry.min.js"
+    "remote-process-server": "entry.min.js"
   },
   "keywords": [
     "backend",
@@ -27,10 +27,10 @@
     ".gitignore",
     ".github/**/*",
     ".scripts/**/*",
+    "config/**/*",
     "postinstall.js",
     "entry.js",
     "maintainance.js",
-    "dist/**/*",
     "test.js",
     "client.py",
     "client/*.py",
@@ -46,8 +46,8 @@
     "postinstall": "node postinstall.js",
     "test": "node test.js",
     "build": "npm run build:entry && npm run build:maintainance",
-    "build:entry": "rolldown entry.js --minify -f es --platform node --file dist/entry.min.js -e ./maintainance.js",
-    "build:maintainance": "rolldown maintainance.js --minify -f es --platform node --file dist/maintainance.js -e ./native/delayed_delete.windows_amd64.node"
+    "build:entry": "rolldown -c ./config/rolldown-config/entry.js",
+    "build:maintainance": "rolldown -c ./config/rolldown-config/maintainance.js"
   },
   "devDependencies": {
     "koffi": "^2.16.0",
