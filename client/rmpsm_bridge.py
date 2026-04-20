@@ -32,6 +32,10 @@ class ServerBridge:
         args = shlex.split(server_path, posix=(os.name != "nt"))
         if not args:
             raise FileNotFoundError("empty server path")
+        if os.name == 'nt':
+            # In Windows, shlex.split(posix=False) does not automatically
+            # strips the outer quotes, so we need to do it manually
+            args = [t.strip('"') for t in args]
 
         # Map stderr argument to subprocess constant
         if stderr == "ignore":
@@ -43,6 +47,10 @@ class ServerBridge:
         else:
             raise ValueError(f"invalid stderr option: {stderr}")
 
+        try:
+            print('Starting server process:', args, file=sys.stderr)
+        except BaseException:
+            pass
         self.proc = subprocess.Popen(
             args,
             #executable=args[0] if os.name == "nt" and os.path.exists(args[0]) else None,

@@ -11,6 +11,11 @@ from rmpsm_runtime import ClientRuntime, Manager, kill_manager
 from rmpsm_errors import ManagerNotRunningError, ConnectionRefusedError
 
 
+def default_server_path():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    return '"' + os.path.normpath(os.path.join(current_dir, '../native/bin/rmpsm_server.' + str(platform.system().lower()) + "_" + str(platform.machine().lower()))) + ('."' if os.name == 'nt' else '"')
+
+
 def main() -> int:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser()
@@ -22,7 +27,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        default='"' + os.path.normpath(os.path.join(current_dir, '../native/bin/rmpsm_server.' + str(platform.system().lower()) + "_" + str(platform.machine().lower()))) + ('."' if os.name == 'nt' else '"'),
+        default=default_server_path(),
         help="[Manager only] specify the server startup command"
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")
