@@ -117,6 +117,7 @@ if (process.env.CI === 'true' && ISWINDOWS) {
     execSync('node entry.js kill', { stdio: 'inherit' });
     server.process = spawn('cmd', ['/D', '/C', '""C:\\Program Files\\test\\remote-process-server.cmd" daemon"'], { stdio: 'inherit', windowsVerbatimArguments: true, shell: false });
     await new Promise(r => setTimeout(r, 3000));
+    spawnSync('cmd', ['/D', '/C', '""C:\\Program Files\\test\\remote-process-server.cmd" run cmd /D /S /C "echo Hello & dir /b C:""'], { stdio: 'inherit', windowsVerbatimArguments: true, shell: false });
     execSync('node entry.js uninstall "C:\\Program Files\\test"', { stdio: 'inherit' });
     await new Promise(r => setTimeout(r, 1000));
     execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager" /v PendingFileRenameOperations', { stdio: 'inherit' });
