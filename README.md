@@ -16,6 +16,63 @@ The server communicates through standard streams (`stdin` / `stdout`) using a fr
 
 ---
 
+## Quick start
+
+Please note that **the client needs Python 3 runtime** to run. The server binary can run in any supported platform, and you can use `copy-server` subcommand to extract the server binary for a specified platform.
+
+Before you start, please choose whether you want to install for just you or for all users.
+
+- Install for **just you**:
+
+```
+npm i -g remote-process-server@latest
+```
+
+- Install the runtime for **all users**:
+
+```bash
+npx remote-process-server@latest install
+# or
+pnpx remote-process-server@latest install
+# Update an existing installation:
+npx remote-process-server@latest update
+```
+
+- Please see the detailed installation guide below if you are using Windows.
+
+---
+
+Start the manager:
+
+```bash
+YOUR_INSTALLATION_PATH/remote-process-server daemon
+# if the path is already in PATH env, or you used npm i -g:
+remote-process-server daemon
+```
+
+Run a command:
+
+```bash
+remote-process-server run -- echo hello
+```
+
+Stop the manager:
+
+```bash
+remote-process-server stop
+```
+
+Uninstall:
+
+```bash
+# For just you:
+npm uni -g remote-process-server
+# For all users:
+remote-process-server uninstall
+```
+
+---
+
 ## Why it exists
 
 The core idea is to let the user choose *how the server starts* without forcing the project to depend on a heavy runtime on the target machine.
@@ -42,38 +99,14 @@ sudo /path/to/server.bin
 
 That may work in some setups, but it is not recommended unless you understand the security consequences.
 
----
-
-## Quick start
-
-Install the runtime:
+**Important note**: `--server` argument specify the **full command line**, not just the path to the actual executable. This means that you **need** to wrap a group of extra quatation marks in the argument if your path has space or etc. For example:
 
 ```bash
-npx remote-process-server@latest install
-```
+# ❌ wrong
+remote-process-server daemon --server="path with space/executable file"
 
-Start the manager:
-
-```bash
-remote-process-server daemon
-```
-
-Run a command:
-
-```bash
-remote-process-server run -- echo hello
-```
-
-Stop the manager:
-
-```bash
-remote-process-server stop
-```
-
-Uninstall:
-
-```bash
-remote-process-server uninstall
+# ✅ correct
+remote-process-server daemon --server="\"path with space/executable file\""
 ```
 
 ---
@@ -91,7 +124,7 @@ npx remote-process-server@latest install [Destination]
 Or install the CLI wrapper globally to the user's package directory:
 
 ```bash
-npm install -g remote-process-server
+npm i -g remote-process-server
 ```
 
 ### Windows installation
@@ -167,7 +200,7 @@ remote-process-server daemon --server="npx remote-process-server@$(remote-proces
 
 * `install` — install or update the runtime
 * `uninstall` — remove an installed runtime
-* `where` — print the installation root (if available)
+* `where` — print the default installation root (if available)
 
 ### Manager commands
 
@@ -272,6 +305,8 @@ The runtime is installed into a protected directory to reduce the risk of unpriv
 
 Integrity verification (e.g. signatures or hashing) is not implemented yet, so the security model currently depends on filesystem permissions and trusted installation paths.
 
+If you found a security problem, please [follow the steps in SECURITY.md](./SECURITY.md) to report it.
+
 ---
 
 ## Development
@@ -285,6 +320,19 @@ Integrity verification (e.g. signatures or hashing) is not implemented yet, so t
 * `server.cpp` — server entry point
 * `compile.sh` / `compile.cmd` — build helpers
 * `sys_name.py` — architecture detection
+
+### Important note about pre-release versions
+
+Pre-release versions and temporarily versions are only for development purposes and **do NOT** receive security updates. They'll also NOT be deprecated if there are some problems or bugs inside. If you are a normal user, please always use stable version and try to keep up-to-date.
+
+The detailed relationships between dist-tags and versions are as follows:
+
+| Version type | Dist tag | Example |
+|--------------|----------|---------|
+| Stable | `latest` | v3.0.0 |
+| Pre-release | `alpha`, `beta`, `rc` | v3.1.0-rc.5 |
+| Temporary | `hotfix` | v3.1.0-hotfix.1 |
+| Internal | `internal-*` | v0.0.0 |
 
 ---
 

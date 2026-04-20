@@ -6,5 +6,10 @@ const expectContent = `#pragma once
 
 `;
 const actualContent = await (async () => { try { return await readFile('server_version.h', { encoding: 'utf-8' }) } catch {} })();
-if (expectContent !== actualContent) await writeFile('server_version.h', expectContent);
+if (expectContent !== actualContent) {
+    await writeFile('server_version.h', expectContent);
+    console.info('[remote-process-server]', 'Updated server_version.h')
+} else {
+    // already up-to-date, print nothing
+}
 

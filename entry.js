@@ -171,7 +171,7 @@ switch (action) {
   install      Copy the package into a installation directory. Usage: install [InstallationDestination]
   update       Install to the target directory and replace the active version. Usage: update [InstallationDestination]
   uninstall    Remove an installed copy. Usage: uninstall [InstallationDestination]
-  where        Show the target installation directory
+  where        Show the default target installation directory (this does not show the existing installation)
 \x1b[1mOther commands\x1b[0m
   arch         Show the current architecture
   is-supported Return whether the current architecture is in the supported architectures list

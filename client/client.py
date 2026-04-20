@@ -22,7 +22,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        default=os.path.join(current_dir, "../native/bin/rmpsm_server." + str(platform.system().lower()) + "_" + str(platform.machine().lower())) + ('.' if os.name == 'nt' else ''),
+        default='"' + os.path.normpath(os.path.join(current_dir, '../native/bin/rmpsm_server.' + str(platform.system().lower()) + "_" + str(platform.machine().lower()))) + ('."' if os.name == 'nt' else '"'),
         help="[Manager only] specify the server startup command"
     )
     parser.add_argument("--stderr", choices=["ignore", "merge", "inherit"], default="inherit", help="[Manager only] How to handle stderr: ignore, merge to stdout, or inherit")
