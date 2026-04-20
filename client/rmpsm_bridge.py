@@ -388,6 +388,6 @@ class ServerBridge:
 
     def send_stop(self) -> None:
         try:
-            self._send_packet(1, 0, 0, b"\x01", require_ack=False)
+            self._send_packet(1, 0, 0, b"\x00", require_ack=False)
         except Exception:
             pass
