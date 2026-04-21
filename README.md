@@ -118,7 +118,7 @@ remote-process-server daemon --server="\"path with space/executable file\""
 Install directly via `npx` without a global install:
 
 ```bash
-npx remote-process-server@latest install [Destination]
+npx remote-process-server@latest install [Destination] [--yes] [--create-link]
 ```
 
 Or install the CLI wrapper globally to the user's package directory:
@@ -129,16 +129,16 @@ npm i -g remote-process-server
 
 ### Windows installation
 
-If you are using Windows, it's then strongly recommended to install the runtime to the system's Program Files directory so that low-permission processes will be unable to tamper with the runtime code:
+If you are using Windows, it's then strongly recommended to install the runtime to the system's Program Files directory so that low-permission processes will be unable to tamper with the runtime code. You can also add `--create-link` to create a wrapper in `%SystemRoot%`:
 
 ```bash
-remote-process-server install
+remote-process-server install --create-link
 ```
 
 You can also specify a custom installation path:
 
 ```bash
-remote-process-server install /path/to/remote-process-server
+remote-process-server install /path/to/remote-process-server 
 ```
 
 ### Detailed installation model explanation
@@ -148,9 +148,10 @@ remote-process-server install /path/to/remote-process-server
 
 * `npm install -g remote-process-server` installs the CLI wrapper
 * `remote-process-server install` installs the actual runtime into a system directory
+* `--create-link` can place a wrapper in a PATH directory for easier access
 * the runtime is stored in versioned directories: `package/<version>/`
-* `installation.data` tracks the active version
-* `remote-process-server uninstall` removes an installed copy cleanly
+* `installation.data` tracks the active version and the optional wrapper path
+* `remote-process-server uninstall` removes an installed copy cleanly and can restart Windows to finish deletion when needed
 
 This separation allows the runtime to live in a protected location, instead of a user-writable npm directory.
 </details>
@@ -161,7 +162,7 @@ This separation allows the runtime to live in a protected location, instead of a
 
 At a high level:
 
-* `install` prepares a versioned runtime in a system directory
+* `install` prepares a versioned runtime in a system directory and can optionally create a PATH wrapper
 * `daemon` starts the manager
 * the manager launches the configured server command
 * `run` sends a command to the manager
@@ -198,8 +199,8 @@ remote-process-server daemon --server="npx remote-process-server@$(remote-proces
 
 ### Maintenance commands
 
-* `install` — install or update the runtime
-* `uninstall` — remove an installed runtime
+* `install` — install or update the runtime; accepts `--yes` and optional `--create-link`
+* `uninstall` — remove an installed runtime; accepts `--yes` and `--restart=(yes|no)` on Windows
 * `where` — print the default installation root (if available)
 
 ### Manager commands

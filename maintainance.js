@@ -17,6 +17,7 @@ import {
 import { basename, dirname, isAbsolute, join, normalize, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { createInterface } from 'node:readline/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +39,233 @@ const ROOT_ARTIFACTS = [
 
 function unique(values) {
     return [...new Set(values.filter(Boolean))];
+}
+
+function isNonEmptyString(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+
+function parseMaintenanceArgs(argv, { allowCreateLink = false, allowRestart = false } = {}) {
+    let destination = null;
+    let yes = false;
+    let createLink = false;
+    let restart = null;
+    let restartSpecified = false;
+
+    for (const token of argv) {
+        if (token === '--yes' || token === '-y') {
+            yes = true;
+            continue;
+        }
+
+        if (allowCreateLink && token === '--create-link') {
+            createLink = true;
+            continue;
+        }
+
+        if (allowRestart && token === '--restart') {
+            restartSpecified = true;
+            restart = true;
+            continue;
+        }
+
+        if (allowRestart && token.startsWith('--restart=')) {
+            restartSpecified = true;
+            const value = token.slice('--restart='.length).trim().toLowerCase();
+            if (value === 'yes' || value === 'true' || value === '1') {
+                restart = true;
+                continue;
+            }
+            if (value === 'no' || value === 'false' || value === '0') {
+                restart = false;
+                continue;
+            }
+            throw new Error(`Invalid value for --restart: ${token.slice('--restart='.length)}`);
+        }
+
+        if (token === '-h' || token === '--help') {
+            continue;
+        }
+
+        if (token.startsWith('-')) {
+            throw new Error(`Unknown option: ${token}`);
+        }
+
+        if (destination === null) {
+            destination = token;
+        } else {
+            throw new Error(`Unexpected positional argument: ${token}`);
+        }
+    }
+
+    return {
+        destination,
+        yes,
+        createLink,
+        restart,
+        restartSpecified,
+    };
+}
+
+async function promptYesNo(message) {
+    if (!process.stdin.isTTY) {
+        return false;
+    }
+
+    const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+    });
+
+    try {
+        const answer = await rl.question(message);
+        return /^[yY](?:es)?$/.test(answer.trim());
+    } finally {
+        rl.close();
+    }
+}
+
+function getWindowsSystemRootDir() {
+    if (!IS_WINDOWS) {
+        return null;
+    }
+
+    const env = process.env;
+    const candidates = [
+        env.SystemRoot,
+        env.WINDIR,
+    ].filter(isNonEmptyString);
+
+    if (candidates.length > 0) {
+        return normalize(candidates[0]);
+    }
+
+    return env.SystemDrive ? normalize(`${env.SystemDrive}\\Windows`) : 'C:\\Windows';
+}
+
+function getBinaryLinkTargetPath() {
+    if (IS_WINDOWS) {
+        return join(getWindowsSystemRootDir(), 'remote-process-server.cmd');
+    }
+
+    const candidates = [];
+    if (isNonEmptyString(process.env.PREFIX)) {
+        candidates.push(join(process.env.PREFIX, 'bin'));
+    }
+    candidates.push('/usr/bin', '/bin');
+
+    for (const candidate of candidates) {
+        if (existsSync(candidate)) {
+            return join(candidate, 'remote-process-server');
+        }
+    }
+
+    return null;
+}
+
+function makeWindowsSystemLinkWrapper(installRoot) {
+    const target = join(installRoot, 'remote-process-server.cmd');
+    return `@echo off
+setlocal
+set "TARGET=${target}"
+if not exist "%TARGET%" (
+    echo ${PRODUCT_NAME}: installation not found at "%TARGET%"
+    exit /b 1
+)
+call "%TARGET%" %*
+exit /b %ERRORLEVEL%
+`;
+}
+
+function makePosixSystemLinkWrapper(installRoot) {
+    const target = join(installRoot, 'remote-process-server');
+    return `#!/usr/bin/env sh
+set -eu
+TARGET='${target.replace(/'/g, `'"'"'`)}'
+if [ ! -x "$TARGET" ]; then
+    printf '%s: installation not found at %s\\n' '${PRODUCT_NAME}' "$TARGET" >&2
+    exit 1
+fi
+exec "$TARGET" "$@"
+`;
+}
+
+function createBinaryLink(installRoot) {
+    const targetPath = getBinaryLinkTargetPath();
+    if (!targetPath) {
+        return {
+            created: false,
+            targetPath: null,
+            warning: `Warning: binary link creation failed (no suitable target directory was found for the system PATH). You may need to manually add the installation to PATH.`,
+        };
+    }
+
+    const wrapper = IS_WINDOWS
+        ? makeWindowsSystemLinkWrapper(installRoot)
+        : makePosixSystemLinkWrapper(installRoot);
+
+    try {
+        mkdirSync(dirname(targetPath), { recursive: true });
+        writeFileSync(targetPath, wrapper, 'utf-8');
+        if (!IS_WINDOWS) {
+            try {
+                chmodSync(targetPath, 0o755);
+            } catch {
+                // best effort only
+            }
+        }
+        return {
+            created: true,
+            targetPath,
+            warning: null,
+        };
+    } catch (err) {
+        return {
+            created: false,
+            targetPath,
+            warning: `Warning: binary link creation failed (${err?.message || err}). You may need to manually add the installation to PATH.`,
+        };
+    }
+}
+
+async function maybePromptForContinuation(kind, productName, installRoot) {
+    if (!process.stdin.isTTY) {
+        return true;
+    }
+
+    const message = kind === 'install'
+        ? `Will install ${productName} to ${installRoot}, continue? (y/N) `
+        : `Will uninstall ${productName} from ${installRoot}, continue? (y/N) `;
+    return await promptYesNo(message);
+}
+
+async function maybeRestartWindowsAfterUninstall(result, restartOption) {
+    if (!IS_WINDOWS || !result.pendingPaths?.length) {
+        return false;
+    }
+
+    if (restartOption === false) {
+        return false;
+    }
+
+    let shouldRestart = restartOption === true;
+    if (restartOption === null) {
+        shouldRestart = await promptYesNo('Do you want to restart now to remove these files? (y/N) ');
+    }
+
+    if (!shouldRestart) {
+        return false;
+    }
+
+    try {
+        execFileSync('shutdown', ['/r', '/t', '0', '/f'], {
+            stdio: 'inherit',
+        });
+        return true;
+    } catch (err) {
+        console.warn(`Warning: failed to restart Windows automatically (${err?.message || err}).`);
+        return false;
+    }
 }
 
 function getWindowsProgramFilesDir() {
@@ -462,7 +690,8 @@ function prepareVersionDir(installRoot, version) {
     return versionDir;
 }
 
-function install(targetArg = null) {
+async function install(targetArg = null, options = {}) {
+    const { yes = false, createLink = false } = options;
     const installRoot = normalizeInstallRoot(targetArg);
     const sourceDir = __dirname;
     const sourceDirAbs = normalize(resolve(sourceDir));
@@ -490,14 +719,33 @@ function install(targetArg = null) {
         }
     }
 
+    if (!yes) {
+        const confirmed = await maybePromptForContinuation('install', PRODUCT_NAME, installRoot);
+        if (!confirmed) {
+            throw new Error('Installation cancelled by user');
+        }
+    }
+
     mkdirSync(getPackageRoot(installRoot), { recursive: true });
 
     const versionDir = prepareVersionDir(installRoot, CURRENT_VERSION);
     const versionDirAbs = normalize(resolve(versionDir));
 
+    let linkReport = {
+        created: false,
+        targetPath: null,
+        warning: null,
+    };
+
     try {
         copyTree(sourceDir, versionDir);
         writeLauncherFiles(installRoot);
+
+        linkReport = createLink ? createBinaryLink(installRoot) : {
+            created: false,
+            targetPath: null,
+            warning: null,
+        };
 
         const now = new Date().toISOString();
         const installedVersions = new Set(
@@ -518,6 +766,7 @@ function install(targetArg = null) {
             installedVersions: Array.from(installedVersions),
             launcher: IS_WINDOWS ? 'remote-process-server.cmd' : 'remote-process-server',
             activeEntry: `package/${CURRENT_VERSION}/entry.js`,
+            binaryLinkPath: linkReport.created ? linkReport.targetPath : (previousData?.binaryLinkPath || null),
             createdAt: previousData?.createdAt || now,
             updatedAt: now,
         };
@@ -561,6 +810,9 @@ function install(targetArg = null) {
             dataPath: getInstallDataPath(installRoot),
             versionDir,
             oldCleanup,
+            binaryLinkCreated: linkReport.created,
+            binaryLinkPath: data.binaryLinkPath,
+            binaryLinkWarning: linkReport.warning,
         };
     } catch (err) {
         // Best effort rollback for a failed install/update.
@@ -568,6 +820,13 @@ function install(targetArg = null) {
             removeTreeBestEffort(versionDir, { scheduleReboot: false });
         } catch {
             // ignore
+        }
+        if (linkReport?.created && linkReport.targetPath) {
+            try {
+                removeTreeBestEffort(linkReport.targetPath, { scheduleReboot: false });
+            } catch {
+                // ignore
+            }
         }
         throw err;
     }
@@ -629,7 +888,8 @@ function removeRootDirectoryIfEmpty(installRoot) {
     }
 }
 
-function uninstall(targetArg = null) {
+async function uninstall(targetArg = null, options = {}) {
+    const { yes = false, restart = null, restartSpecified = false } = options;
     const inferredRoot = targetArg ? null : inferInstallRootFromModuleDir();
     const installRoot = normalizeInstallRoot(targetArg || inferredRoot || getDefaultInstallRoot());
 
@@ -648,7 +908,28 @@ function uninstall(targetArg = null) {
         );
     }
 
+    if (!yes) {
+        const confirmed = await maybePromptForContinuation('uninstall', PRODUCT_NAME, installRoot);
+        if (!confirmed) {
+            throw new Error('Uninstallation cancelled by user');
+        }
+    }
+
     const packageDir = getPackageRoot(installRoot);
+
+    const binaryLinkReport = data.binaryLinkPath && existsSync(data.binaryLinkPath)
+        ? removeTreeBestEffort(data.binaryLinkPath, { scheduleReboot: true })
+        : {
+            target: data.binaryLinkPath || null,
+            removedPaths: [],
+            pendingPaths: [],
+            scheduledPaths: [],
+            failedSchedulingPaths: [],
+            warnings: [],
+            existsAfter: false,
+            removed: true,
+            rebootNeeded: false,
+        };
 
     const rootArtifactReports = removeKnownRootArtifacts(installRoot);
     const packageReport = existsSync(packageDir)
@@ -668,17 +949,20 @@ function uninstall(targetArg = null) {
     const rootCheck = removeRootDirectoryIfEmpty(installRoot);
 
     const pendingPaths = unique([
+        ...binaryLinkReport.pendingPaths,
         ...rootArtifactReports.flatMap(r => r.pendingPaths || []),
         ...packageReport.pendingPaths,
         ...rootCheck.pendingPaths,
     ]);
 
     const scheduledPaths = unique([
+        ...binaryLinkReport.scheduledPaths,
         ...rootArtifactReports.flatMap(r => r.scheduledPaths || []),
         ...packageReport.scheduledPaths,
     ]);
 
     const warnings = unique([
+        ...binaryLinkReport.warnings,
         ...rootArtifactReports.flatMap(r => r.warnings || []),
         ...packageReport.warnings,
         ...rootCheck.warnings,
@@ -686,6 +970,13 @@ function uninstall(targetArg = null) {
 
     const remainingEntries = rootCheck.remainingEntries || [];
     const rootRemoved = rootCheck.removed;
+    const restartNeeded = IS_WINDOWS && pendingPaths.length > 0;
+    let restarted = false;
+
+    if (restartNeeded) {
+        const shouldRestart = await maybeRestartWindowsAfterUninstall({ pendingPaths }, restartSpecified ? restart : null);
+        restarted = shouldRestart;
+    }
 
     return {
         installRoot,
@@ -693,11 +984,15 @@ function uninstall(targetArg = null) {
         rootRemoved,
         remainingEntries,
         data,
+        binaryLinkReport,
         rootArtifactReports,
         packageReport,
         pendingPaths,
         scheduledPaths,
         warnings,
+        restartNeeded,
+        restarted,
+        restartSpecified,
     };
 }
 
@@ -706,40 +1001,47 @@ function printInstallResult(result) {
         console.log(`Installed ${PRODUCT_NAME} ${result.version} to ${result.installRoot}`);
         console.log(`Version payload: ${result.versionDir}`);
         console.log(`Launcher: ${join(result.installRoot, IS_WINDOWS ? 'remote-process-server.cmd' : 'remote-process-server')}`);
-        return;
-    }
-
-    if (result.previousVersion && result.previousVersion !== result.version) {
-        console.log(`Updated ${PRODUCT_NAME} at ${result.installRoot}`);
-        console.log(`Previous version: ${result.previousVersion}`);
-        console.log(`Current version: ${result.version}`);
-        console.log(`Version payload: ${result.versionDir}`);
     } else {
-        console.log(`Refreshed existing ${PRODUCT_NAME} ${result.version} at ${result.installRoot}`);
-        console.log(`Version payload: ${result.versionDir}`);
-    }
-
-    if (result.oldCleanup) {
-        if (result.oldCleanup.skipped) {
-            console.log('Old version cleanup was skipped because it would have touched the currently running source tree.');
-        } else if (result.oldCleanup.removed) {
-            console.log(`Previous version directory removed: ${result.oldCleanup.target}`);
-        } else if (result.oldCleanup.pendingPaths?.length) {
-            console.log(`Previous version cleanup is not fully finished yet: ${formatPathList(result.oldCleanup.pendingPaths)}`);
+        if (result.previousVersion && result.previousVersion !== result.version) {
+            console.log(`Updated ${PRODUCT_NAME} at ${result.installRoot}`);
+            console.log(`Previous version: ${result.previousVersion}`);
+            console.log(`Current version: ${result.version}`);
+            console.log(`Version payload: ${result.versionDir}`);
+        } else {
+            console.log(`Refreshed existing ${PRODUCT_NAME} ${result.version} at ${result.installRoot}`);
+            console.log(`Version payload: ${result.versionDir}`);
         }
-    }
 
-    if (result.oldCleanup?.scheduledPaths?.length) {
-        console.log(`Some old files will be removed after restart: ${formatPathList(result.oldCleanup.scheduledPaths)}`);
-    }
-
-    if (result.oldCleanup?.warnings?.length) {
-        for (const warning of result.oldCleanup.warnings) {
-            console.warn(`Warning: ${warning}`);
+        if (result.oldCleanup) {
+            if (result.oldCleanup.skipped) {
+                console.log('Old version cleanup was skipped because it would have touched the currently running source tree.');
+            } else if (result.oldCleanup.removed) {
+                console.log(`Previous version directory removed: ${result.oldCleanup.target}`);
+            } else if (result.oldCleanup.pendingPaths?.length) {
+                console.log(`Previous version cleanup is not fully finished yet: ${formatPathList(result.oldCleanup.pendingPaths)}`);
+            }
         }
+
+        if (result.oldCleanup?.scheduledPaths?.length) {
+            console.log(`Some old files will be removed after restart: ${formatPathList(result.oldCleanup.scheduledPaths)}`);
+        }
+
+        if (result.oldCleanup?.warnings?.length) {
+            for (const warning of result.oldCleanup.warnings) {
+                console.warn(`Warning: ${warning}`);
+            }
+        }
+
+        console.log(`Launcher: ${join(result.installRoot, IS_WINDOWS ? 'remote-process-server.cmd' : 'remote-process-server')}`);
     }
 
-    console.log(`Launcher: ${join(result.installRoot, IS_WINDOWS ? 'remote-process-server.cmd' : 'remote-process-server')}`);
+    if (result.binaryLinkCreated) {
+        console.log(`Binary link created: ${result.binaryLinkPath}`);
+    }
+
+    if (result.binaryLinkWarning) {
+        console.warn(result.binaryLinkWarning);
+    }
 }
 
 function printUninstallResult(result) {
@@ -749,11 +1051,17 @@ function printUninstallResult(result) {
     }
 
     if (result.pendingPaths?.length) {
-        console.log(`Some files could not be removed immediately and will need restart cleanup: ${formatPathList(result.pendingPaths)}`);
+        console.log(
+            `The installation directory couldn't be removed immediately because it couldn't delete ${formatPathList(result.pendingPaths)}. You need to restart your computer to completely uninstall this product.`
+        );
     }
 
     if (result.scheduledPaths?.length) {
         console.log(`Some paths were scheduled for deletion after restart: ${formatPathList(result.scheduledPaths)}`);
+    }
+
+    if (result.restarted) {
+        console.log('Restarting now...');
     }
 
     if (result.warnings?.length) {
@@ -778,72 +1086,86 @@ function printUninstallResult(result) {
     }
 }
 
-function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2)) {
     const [command = '', ...rest] = argv;
-    
+
     if (rest[0] === '-h' || rest[0] === '--help') {
         switch (command) {
             case 'install':
             case 'update':
-                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js ${command} [InstallationDestination]
+                console.error(`[1;4mUsage:[0m maintainance.js ${command} [InstallationDestination] [--yes] [--create-link]
 
-\x1b[1;4mDescription:\x1b[0m
+[1;4mDescription:[0m
   Install or update the application to the specified directory.
   If no InstallationDestination is provided, the default install root is used.
-
-\x1b[1;4mDefault install root:\x1b[0m
-  Windows: %ProgramFiles%\\${PRODUCT_NAME}
-  Other:   /opt/${PRODUCT_NAME}`);
+  --yes skips the confirmation prompt.
+  --create-link creates a PATH wrapper in a system directory.`);
                 break;
             case 'uninstall':
-                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js uninstall [InstallationDestination]
+                console.error(`[1;4mUsage:[0m maintainance.js uninstall [InstallationDestination] [--yes] [--restart=(yes|no)]
 
-\x1b[1;4mDescription:\x1b[0m
+[1;4mDescription:[0m
   Remove an installed copy of ${PRODUCT_NAME}.
+  --yes skips the confirmation prompt.
+  --restart controls whether Windows restarts to finish removing locked files.
   If no InstallationDestination is provided, the command will try to infer the install
   root from the current module location, or fall back to the default install root.`);
                 break;
             case 'where':
-                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js where [InstallationDestination]
+                console.error(`[1;4mUsage:[0m maintainance.js where [InstallationDestination]
 
-\x1b[1;4mDescription:\x1b[0m
+[1;4mDescription:[0m
   Print the normalized install root path.
   If a InstallationDestination is given, it is normalized and printed.
   Otherwise, the default install root is printed.`);
                 break;
             default:
-                console.error(`\x1b[1;4mUsage:\x1b[0m maintainance.js <command> [options]
+                console.error(`[1;4mUsage:[0m maintainance.js <command> [options]
 
-\x1b[1;4mCommands:\x1b[0m
+[1;4mCommands:[0m
   install [path]   Install or update the application to the specified directory
   update [path]    Alias for install
   uninstall [path] Uninstall the application from the specified directory
   where [path]     Print the normalized install root path
 
-\x1b[1;4mOptions:\x1b[0m
+[1;4mOptions:[0m
   -h, --help       Show this help message`);
         }
         return;
     }
-    
-    if (rest.length > 1) throw new TypeError('Too many arguments');
 
     switch (command) {
         case 'install':
         case 'update': {
-            const result = install(rest[0]);
+            const parsed = parseMaintenanceArgs(rest, { allowCreateLink: true });
+            const result = await install(parsed.destination, {
+                yes: parsed.yes,
+                createLink: parsed.createLink,
+            });
             printInstallResult(result);
             break;
         }
 
         case 'uninstall': {
-            const result = uninstall(rest[0]);
+            const parsed = parseMaintenanceArgs(rest, { allowRestart: true });
+            if (!IS_WINDOWS && parsed.restartSpecified) {
+                console.warn('Warning: --restart is only supported on Windows and will be ignored.');
+            }
+            const result = await uninstall(parsed.destination, {
+                yes: parsed.yes,
+                restart: parsed.restart,
+                restartSpecified: parsed.restartSpecified,
+            });
             printUninstallResult(result);
             break;
         }
 
         case 'where': {
-            console.log(normalizeInstallRoot(rest[0]));
+            const parsed = parseMaintenanceArgs(rest, {});
+            if (parsed.createLink || parsed.restartSpecified || parsed.yes) {
+                throw new Error('The where command does not accept option flags');
+            }
+            console.log(normalizeInstallRoot(parsed.destination));
             break;
         }
 
@@ -853,12 +1175,10 @@ function main(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-    try {
-        main();
-    } catch (err) {
+    Promise.resolve(main()).catch((err) => {
         console.error(err?.stack || err);
         process.exit(1);
-    }
+    });
 }
 
 export {
@@ -873,3 +1193,4 @@ export {
     uninstall,
     writeLauncherFiles,
 };
+

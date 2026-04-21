@@ -48,6 +48,7 @@ function getServerBinaryPath(arch) {
 
 function runServerBinary(arch, args) {
     const binaryPath = getServerBinaryPath(arch);
+    // @ts-ignore
     const child = spawn(binaryPath, args, { stdio: 'inherit', executable: binaryPath });
     child.on('exit', (code) => process.exit(code));
 }
@@ -60,7 +61,7 @@ function runPythonClient(args, headless = false) {
 async function runMaintenance(command, restArgs) {
     const { main } = await import('./maintainance' + (__filename.endsWith('.min.js') ? '.min.js' : '.js'));
     try {
-        main([command, ...restArgs]);
+        await main([command, ...restArgs]);
     } catch (err) {
         console.error(err?.message || err);
         process.exit(1);
@@ -168,9 +169,9 @@ switch (action) {
   copy-server  Copy the server binary to the specified path. Usage: copy-server <target_filename> [arch]; Default to current arch; fails if the specified arch is not found
   list-arch    List the currently supported architectures
 \x1b[1mInstallation commands\x1b[0m
-  install      Copy the package into a installation directory. Usage: install [InstallationDestination]
-  update       Install to the target directory and replace the active version. Usage: update [InstallationDestination]
-  uninstall    Remove an installed copy. Usage: uninstall [InstallationDestination]
+  install      Copy the package into a installation directory. Usage: install [InstallationDestination] [--yes] [--create-link]
+  update       Install to the target directory and replace the active version. Usage: update [InstallationDestination] [--yes] [--create-link]
+  uninstall    Remove an installed copy. Usage: uninstall [InstallationDestination] [--yes] [--restart=(yes|no)]
   where        Show the default target installation directory (this does not show the existing installation)
 \x1b[1mOther commands\x1b[0m
   arch         Show the current architecture

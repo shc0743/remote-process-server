@@ -1,6 +1,6 @@
 {
   "name": "remote-process-server",
-  "version": "3.1.3",
+  "version": "3.2.0",
   "description": "A client/server system for remotely creating and managing processes",
   "bin": {
     "remote-process-server": "entry.min.js"
@@ -31,10 +31,7 @@
     ".github/**/*",
     ".scripts/**/*",
     "config/**/*",
-    "postinstall.js",
-    "entry.*",
-    "maintainance.*",
-    "test.js",
+    "*.js",
     "client.py",
     "client/*.py",
     "server.cpp",
@@ -47,12 +44,18 @@
   "scripts": {
     "postinstall": "node postinstall.js",
     "test": "node test.js",
-    "build": "npm run build:entry && npm run build:maintainance",
+    "build": "npm run type-check && npm run build-only && npm run obfuscate",
+    "type-check": "tsc --noEmit",
+    "build-only": "npm run build:entry && npm run build:maintainance",
     "build:entry": "rolldown -c ./config/rolldown-config/entry.js",
-    "build:maintainance": "rolldown -c ./config/rolldown-config/maintainance.js"
+    "build:maintainance": "rolldown -c ./config/rolldown-config/maintainance.js",
+    "obfuscate": "node .scripts/obfuscate.js"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
+    "javascript-obfuscator": "^4.2.2",
     "koffi": "^2.16.0",
-    "rolldown": "^1.0.0-rc.16"
+    "rolldown": "^1.0.0-rc.16",
+    "typescript": "^6.0.3"
   }
 }
