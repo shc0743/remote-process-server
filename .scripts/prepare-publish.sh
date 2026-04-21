@@ -34,13 +34,13 @@ def fetch_runs():
         data = json.load(resp)
     return data.get("workflow_runs", [])
 
-for _ in range(15):
+for _ in range(19):
     runs = fetch_runs()
     for run in runs:
         if run.get("conclusion") == "success":
             print(run["id"])
             sys.exit(0)
-    time.sleep(20)
+    time.sleep(15)
 
 sys.exit(1)
 PY

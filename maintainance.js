@@ -223,7 +223,7 @@ function createBinaryLink(installRoot) {
         return {
             created: false,
             targetPath,
-            warning: `Warning: binary link creation failed (${err?.message || err}). You may need to manually add the installation to PATH.`,
+            warning: `Warning: binary link creation failed (${String(err)}). You may need to manually add the installation to PATH.`,
         };
     }
 }
@@ -263,7 +263,7 @@ async function maybeRestartWindowsAfterUninstall(result, restartOption) {
         });
         return true;
     } catch (err) {
-        console.warn(`Warning: failed to restart Windows automatically (${err?.message || err}).`);
+        console.warn(`Warning: failed to restart Windows automatically (${String(err)}).`);
         return false;
     }
 }
@@ -571,7 +571,7 @@ function removeTreeBestEffort(pathname, options = {}) {
                 retryDelay: 100,
             });
         } catch (err) {
-            report.warnings.push(`Failed to remove ${pathname}: ${err?.message || err}`);
+            report.warnings.push(`Failed to remove ${pathname}: ${String(err)}`);
         }
 
         report.existsAfter = existsSync(pathname);
@@ -588,7 +588,7 @@ function removeTreeBestEffort(pathname, options = {}) {
         try {
             stat = lstatSync(currentPath);
         } catch (err) {
-            report.warnings.push(`Failed to stat ${currentPath}: ${err?.message || err}`);
+            report.warnings.push(`Failed to stat ${currentPath}: ${String(err)}`);
             report.pendingPaths.push(currentPath);
             return;
         }
@@ -598,7 +598,7 @@ function removeTreeBestEffort(pathname, options = {}) {
             try {
                 children = readdirSync(currentPath);
             } catch (err) {
-                report.warnings.push(`Failed to read directory ${currentPath}: ${err?.message || err}`);
+                report.warnings.push(`Failed to read directory ${currentPath}: ${String(err)}`);
                 report.pendingPaths.push(currentPath);
                 return;
             }
@@ -615,7 +615,7 @@ function removeTreeBestEffort(pathname, options = {}) {
                     if (isDeletionBlockedError(err)) {
                         report.pendingPaths.push(currentPath);
                     } else {
-                        report.warnings.push(`Failed to remove directory ${currentPath}: ${err?.message || err}`);
+                        report.warnings.push(`Failed to remove directory ${currentPath}: ${String(err)}`);
                         report.pendingPaths.push(currentPath);
                     }
                 }
@@ -631,7 +631,7 @@ function removeTreeBestEffort(pathname, options = {}) {
                 if (isDeletionBlockedError(err)) {
                     report.pendingPaths.push(currentPath);
                 } else {
-                    report.warnings.push(`Failed to remove file ${currentPath}: ${err?.message || err}`);
+                    report.warnings.push(`Failed to remove file ${currentPath}: ${String(err)}`);
                     report.pendingPaths.push(currentPath);
                 }
             }
@@ -878,9 +878,9 @@ function removeRootDirectoryIfEmpty(installRoot) {
             pendingPaths,
             remainingEntries: [],
             warnings: scheduleResult.supported
-                ? [`Failed to remove empty install root immediately: ${err?.message || err}`]
+                ? [`Failed to remove empty install root immediately: ${String(err)}`]
                 : [
-                    `Failed to remove empty install root immediately: ${err?.message || err}`,
+                    `Failed to remove empty install root immediately: ${String(err)}`,
                     'Windows reboot-delete support is unavailable, so the empty install root may need manual cleanup after restart.',
                 ],
             rebootNeeded: true,
@@ -1051,8 +1051,8 @@ function printUninstallResult(result) {
     }
 
     if (result.pendingPaths?.length) {
-        console.log(
-            `The installation directory couldn't be removed immediately because it couldn't delete ${formatPathList(result.pendingPaths)}. You need to restart your computer to completely uninstall this product.`
+        console.warn(
+            `Warning: The installation directory couldn't be removed immediately because the following objects are being used: ${formatPathList(result.pendingPaths)}\n You need to restart your computer to completely uninstall this product.`
         );
     }
 
@@ -1077,11 +1077,11 @@ function printUninstallResult(result) {
 
     if (result.remainingEntries?.length) {
         console.log(
-            `Removed generated installation files from ${result.installRoot}, but the installation directory was not automatically removed because it still contains ${result.remainingEntries.length} entries. Please remove it manually if you need.`
+            `Removed installation files from ${result.installRoot}, but the installation directory was not automatically removed because it still contains ${result.remainingEntries.length} entries. Please remove it manually if you need.`
         );
     } else {
         console.log(
-            `Removed generated installation files from ${result.installRoot}, but the installation directory could not be removed immediately. Please remove it manually if you need.`
+            `Removed installation files from ${result.installRoot}, but the installation directory could not be removed immediately. Please remove it manually if you need.`
         );
     }
 }
