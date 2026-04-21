@@ -2,7 +2,7 @@
 import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readdirSync, copyFileSync, existsSync, readFileSync } from 'fs';
+import { readdirSync, copyFileSync, existsSync, readFileSync, statSync, rmSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -56,6 +56,50 @@ function runServerBinary(arch, args) {
 function runPythonClient(args, headless = false) {
     const child = spawn((ISWINDOWS && headless) ? 'pythonw' : 'python', [CLIENT_PY, ...args], { stdio: 'inherit', detached: !!headless });
     child.on('exit', (code) => process.exit(code));
+}
+
+function stripPackage() {
+    // These are source codes that are not useful for end users and can be removed safely.
+    const toDelete = [
+        '.github', '.scripts', 'config', 'server', '.npmignore',
+        'compile.cmd', 'compile.sh', 'entry.js', 'LICENSE',
+        'maintainance.js', 'server.cpp', 'server_version.h', 'test.js'
+    ];
+    
+    function getSize(itemPath) {
+        if (!existsSync(itemPath)) return 0;
+        const stat = statSync(itemPath);
+        if (stat.isFile()) return stat.size;
+        if (stat.isDirectory()) {
+            let total = 0;
+            const files = readdirSync(itemPath);
+            for (const file of files) {
+                total += getSize(join(itemPath, file));
+            }
+            return total;
+        }
+        return 0;
+    }
+    
+    let totalSize = 0;
+    for (const item of toDelete) {
+        totalSize += getSize(join(__dirname, item));
+    }
+    
+    const packageLockPath = join(__dirname, 'package-lock.json');
+    if (existsSync(packageLockPath)) {
+        console.error('Error: It seems like you are in a development environment. Removing these files may lost your work progress. Operation cancelled.');
+        process.exit(1);
+    }
+    
+    for (const item of toDelete) {
+        const fullPath = join(__dirname, item);
+        if (existsSync(fullPath)) {
+            rmSync(fullPath, { recursive: true, force: true });
+        }
+    }
+    
+    console.log(`🎉 Successfully stripped ${totalSize} bytes! You can get these files again by reinstalling the package.`);
 }
 
 async function runMaintenance(command, restArgs) {
@@ -148,6 +192,10 @@ switch (action) {
         }
         break;
     }
+    
+    case 'strip':
+        stripPackage();
+        break;
 
     default:
         console.error(`\x1b[1;4mUsage:\x1b[0m npx remote-process-server ACTION args
@@ -177,6 +225,7 @@ switch (action) {
   arch         Show the current architecture
   is-supported Return whether the current architecture is in the supported architectures list
   helpclient   Show the help of the Python client
+  strip        Strip the package size by removing unnecessary files
   version      Show the current version
 `);
         process.exit(1);
