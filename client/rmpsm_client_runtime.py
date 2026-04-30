@@ -215,6 +215,11 @@ class ClientRuntime:
             else:
                 self._query_error_code = err
                 self._query_error_request_id = self._next_req_id()
+                try:
+                    sys.stderr.write(f"create_task failed, querying reason..." + ('\b' * 20))
+                    sys.stderr.flush()
+                except BaseException:
+                    pass
                 self._send_frame(
                     C2M_QUERY_ERROR,
                     pack_query_error_request(self._query_error_request_id, err),
@@ -234,9 +239,9 @@ class ClientRuntime:
             err_code = self._query_error_code or 0
             desc = text if found else "Unknown error"
             try:
-                sys.stderr.write(f"create_task failed: {desc} ({err_code})\n")
+                sys.stderr.write(f"{' ' * 20}\rcreate_task failed: {desc} ({err_code})\n")
                 sys.stderr.flush()
-            except Exception:
+            except BaseException:
                 pass
             self.exit_code = 1
             self.stop_event.set()
