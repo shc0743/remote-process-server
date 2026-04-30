@@ -370,15 +370,14 @@ class ClientRuntime:
             if not need_quote:
                 parts.append(arg)
             else:
-                escaped = arg.replace('"', '""')
-                parts.append(f'"{escaped}"')
+                parts.append(f'"{arg}"')
 
         return ' '.join(parts)
 
     def run(self) -> int:
         self.open_manager_session()
 
-        cmdline = ((self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else subprocess.list2cmdline(self.cmd_argv)) if os.name == 'nt' else shlex.join(self.cmd_argv)).encode("utf-8")
+        cmdline = (self._join_cmdline_for_cmd(self.cmd_argv) if self._useCmdSyntax else (subprocess.list2cmdline(self.cmd_argv) if os.name == 'nt' else shlex.join(self.cmd_argv))).encode("utf-8")
 
         self._create_task_request_id = self._next_req_id()
         self._send_frame(
