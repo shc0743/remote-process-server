@@ -7,6 +7,7 @@ from rmpsm_protocol import (
     M2C_CREATE_SESSION_RESP,
     M2C_CREATE_TASK_RESP,
     M2C_GENERIC_RESP,
+    M2C_QUERY_ERROR_RESP,
     M2C_SERVER_DEAD,
     M2C_STDERR,
     M2C_STDOUT,
@@ -14,6 +15,7 @@ from rmpsm_protocol import (
     pack_create_session_resp,
     pack_create_task_resp,
     pack_generic_resp,
+    pack_query_error_resp,
     pack_stdout_stderr,
     pack_task_end,
 )
@@ -64,6 +66,9 @@ class SessionProxy:
 
     def send_server_dead(self) -> None:
         self._send_frame(M2C_SERVER_DEAD, b"")
+
+    def send_query_error_resp(self, request_id: int, found: bool, text: str = "") -> None:
+        self._send_frame(M2C_QUERY_ERROR_RESP, pack_query_error_resp(request_id, found, text))
 
     def close(self) -> None:
         self.stop_event.set()

@@ -1,9 +1,5 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(./compile.sh:*)",
-      "Bash(ls:*)",
-      "Bash(> /tmp/rmpsm.log)"
-    ]
+    "allow": []
   }
 }

@@ -41,6 +41,8 @@ M2C_STDOUT = 14
 M2C_STDERR = 15
 M2C_TASK_END = 16
 M2C_SERVER_DEAD = 17
+C2M_QUERY_ERROR = 18
+M2C_QUERY_ERROR_RESP = 19
 
 
 def _default_user_suffix() -> str:
@@ -156,6 +158,30 @@ def pack_task_io_request(request_id: int, task_id: int, data: bytes) -> bytes:
 
 def pack_task_id_request(request_id: int, task_id: int) -> bytes:
     return pack_request_id(request_id) + u64_to_bytes(task_id)
+
+
+def pack_query_error_request(request_id: int, error_code: int) -> bytes:
+    return pack_request_id(request_id) + u32_to_bytes(error_code)
+
+
+def pack_query_error_resp(request_id: int, found: bool, text: str = "") -> bytes:
+    return (
+        u64_to_bytes(request_id)
+        + struct.pack("<B", 1 if found else 0)
+        + pack_text(text)
+    )
+
+
+def decode_query_error_resp(payload: bytes) -> Tuple[int, bool, str]:
+    off = 0
+    if len(payload) < 9:
+        raise ValueError("truncated query_error response")
+    request_id = bytes_to_u64(payload[off:off + 8])
+    off += 8
+    found = payload[off] != 0
+    off += 1
+    text, off = unpack_text(payload, off)
+    return request_id, found, text
 
 
 def pack_stop_manager_request(request_id: int) -> bytes:

@@ -18,11 +18,13 @@ from rmpsm_protocol import (
     C2M_CREATE_SESSION,
     C2M_CREATE_TASK,
     C2M_KILL,
+    C2M_QUERY_ERROR,
     C2M_STDIN,
     C2M_STDIN_EOF,
     C2M_STOP_MANAGER,
     M2C_AUTH_FAIL,
     M2C_AUTH_OK,
+    bytes_to_u32,
     bytes_to_u64,
     pack_frame,
     pack_generic_resp,
@@ -297,13 +299,7 @@ class Manager:
                             self.bridge.register_task(session.session_id, task_id)
                             session.send_create_task_resp(request_id, True, task_id, 0, "")
                         else:
-                            session.send_create_task_resp(
-                                request_id,
-                                False,
-                                0,
-                                err,
-                                os.strerror(err) if err else "create_task failed",
-                            )
+                            session.send_create_task_resp(request_id, False, 0, err, "")
                         continue
 
                     if msg_type == C2M_STDIN:
@@ -332,6 +328,16 @@ class Manager:
                         task_id = bytes_to_u64(payload[8:16])
                         self.bridge.kill_task(task_id)
                         session.send_generic_resp(request_id, True, 0, "")
+                        continue
+
+                    if msg_type == C2M_QUERY_ERROR:
+                        if len(payload) < 12:
+                            continue
+                        request_id = bytes_to_u64(payload[:8])
+                        err_code = bytes_to_u32(payload[8:12])
+                        found, text = self.bridge.query_error(err_code)
+                        if session is not None:
+                            session.send_query_error_resp(request_id, found, text)
                         continue
 
                     if msg_type == C2M_CLOSE_SESSION:

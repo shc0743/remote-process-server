@@ -844,6 +844,50 @@ inline void Server::handle_kill_task(
     local_app_enqueued = true;
 }
 
+inline void Server::handle_query_error(uint64_t requestId, const std::vector<uint8_t>& payload, bool& local_app_enqueued) {
+    if (payload.size() < 4) {
+        queue_reply_errno(requestId, 0, EINVAL);
+        local_app_enqueued = true;
+        return;
+    }
+
+    uint32_t err_code = (uint32_t)payload[0]
+                      | ((uint32_t)payload[1] << 8)
+                      | ((uint32_t)payload[2] << 16)
+                      | ((uint32_t)payload[3] << 24);
+
+    wchar_t* wbuf = nullptr;
+    DWORD n = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        (DWORD)err_code,
+        0,
+        (LPWSTR)&wbuf,
+        0,
+        nullptr
+    );
+
+    std::vector<uint8_t> resp;
+    if (n > 0 && wbuf != nullptr) {
+        while (n > 0 && (wbuf[n - 1] == L'\r' || wbuf[n - 1] == L'\n')) {
+            --n;
+        }
+        int len = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)n, nullptr, 0, nullptr, nullptr);
+        resp.push_back(1);
+        if (len > 0) {
+            size_t off = resp.size();
+            resp.resize(off + (size_t)len);
+            WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)n, (LPSTR)(resp.data() + off), len, nullptr, nullptr);
+        }
+        LocalFree(wbuf);
+    } else {
+        resp.push_back(0);
+    }
+
+    queue_reliable_packet(0, requestId, 0, resp.data(), resp.size());
+    local_app_enqueued = true;
+}
+
 inline void Server::handle_input_data(
     uint64_t requestId,
     uint64_t taskId,

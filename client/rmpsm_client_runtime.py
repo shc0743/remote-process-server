@@ -17,6 +17,7 @@ from rmpsm_protocol import (
     C2M_CLOSE_SESSION,
     C2M_CREATE_SESSION,
     C2M_CREATE_TASK,
+    C2M_QUERY_ERROR,
     C2M_STOP_MANAGER,
     C2M_STDIN,
     C2M_STDIN_EOF,
@@ -26,6 +27,7 @@ from rmpsm_protocol import (
     M2C_CREATE_SESSION_RESP,
     M2C_CREATE_TASK_RESP,
     M2C_GENERIC_RESP,
+    M2C_QUERY_ERROR_RESP,
     M2C_SERVER_DEAD,
     M2C_STDERR,
     M2C_STDOUT,
@@ -34,10 +36,12 @@ from rmpsm_protocol import (
     bytes_to_u32,
     decode_create_session_resp,
     decode_create_task_resp,
+    decode_query_error_resp,
     decode_task_end_payload,
     pack_create_session_request,
     pack_create_task_request,
     pack_frame,
+    pack_query_error_request,
     pack_request_id,
     pack_stop_manager_request,
     pack_task_id_request,
@@ -76,6 +80,8 @@ class ClientRuntime:
         self._stderr_queue: "queue.Queue[Optional[bytes]]" = queue.Queue()
 
         self._create_task_request_id: Optional[int] = None
+        self._query_error_code: Optional[int] = None
+        self._query_error_request_id: Optional[int] = None
         self._useCmdSyntax = useCmdSyntax
 
     def _next_req_id(self) -> int:
@@ -207,13 +213,33 @@ class ClientRuntime:
                 with self._stdin_lock:
                     self._flush_stdin_locked()
             else:
-                try:
-                    sys.stderr.write(f"create_task failed: {message or 'error'} ({err})\n")
-                    sys.stderr.flush()
-                except Exception:
-                    pass
-                self.exit_code = 1
-                self.stop_event.set()
+                self._query_error_code = err
+                self._query_error_request_id = self._next_req_id()
+                self._send_frame(
+                    C2M_QUERY_ERROR,
+                    pack_query_error_request(self._query_error_request_id, err),
+                )
+
+        elif msg_type == M2C_QUERY_ERROR_RESP:
+            if self._query_error_request_id is None:
+                return
+            try:
+                resp_request_id, found, text = decode_query_error_resp(payload)
+            except Exception:
+                return
+            if resp_request_id != self._query_error_request_id:
+                return
+            self._query_error_request_id = None
+
+            err_code = self._query_error_code or 0
+            desc = text if found else "Unknown error"
+            try:
+                sys.stderr.write(f"create_task failed: {desc} ({err_code})\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+            self.exit_code = 1
+            self.stop_event.set()
 
         elif msg_type == M2C_STDOUT:
             if len(payload) < 8:

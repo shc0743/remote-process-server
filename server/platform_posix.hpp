@@ -254,26 +254,10 @@ inline bool spawn_task(const std::string& cmdline, uint64_t taskId, Task& outTas
 
         execvp(argv[0], argv.data());
         int exec_errno = errno;
-        const char* err_msg = nullptr;
-        switch (exec_errno) {
-            case ENOENT:
-                err_msg = "error: command not found: ";
-                break;
-            case EACCES:
-                err_msg = "error: permission denied: ";
-                break;
-            case EISDIR:
-                err_msg = "error: is a directory: ";
-                break;
-            case ENOEXEC:
-                err_msg = "error: exec format error: ";
-                break;
-            default:
-                err_msg = "error: failed to execute: ";
-                break;
-        }
-        write(STDERR_FILENO, err_msg, strlen(err_msg));
-        write(STDERR_FILENO, argv[0], strlen(argv[0]));
+        const char* err_desc = std::strerror(exec_errno);
+        write(STDERR_FILENO, err_desc, std::strlen(err_desc));
+        write(STDERR_FILENO, ": ", 2);
+        write(STDERR_FILENO, argv[0], std::strlen(argv[0]));
         write(STDERR_FILENO, "\n", 1);
         _exit(127);
     }
@@ -390,6 +374,28 @@ inline void Server::handle_kill_task(
     t->stdin_queue.clear();
     t->stdin_offset = 0;
     queue_reply_empty(requestId, taskId);
+    local_app_enqueued = true;
+}
+
+inline void Server::handle_query_error(uint64_t requestId, const std::vector<uint8_t>& payload, bool& local_app_enqueued) {
+    if (payload.size() < 4) {
+        queue_reply_errno(requestId, 0, EINVAL);
+        local_app_enqueued = true;
+        return;
+    }
+
+    uint32_t err_code = (uint32_t)payload[0]
+                      | ((uint32_t)payload[1] << 8)
+                      | ((uint32_t)payload[2] << 16)
+                      | ((uint32_t)payload[3] << 24);
+
+    const char* msg = std::strerror((int)err_code);
+
+    std::vector<uint8_t> resp;
+    resp.push_back(1);
+    resp.insert(resp.end(), msg, msg + std::strlen(msg));
+
+    queue_reliable_packet(0, requestId, 0, resp.data(), resp.size());
     local_app_enqueued = true;
 }
 

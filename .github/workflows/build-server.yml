@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  TZ: "Asia/Shanghai"
+
 jobs:
   build-windows:
     runs-on: windows-latest

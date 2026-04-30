@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import os
 import shlex
+import struct
 import subprocess
 import sys
 import threading
@@ -86,6 +87,9 @@ class ServerBridge:
         self._pending: Dict[int, PendingCreateTask] = {}
         self._orphan_packets: Dict[int, List[Tuple[int, bytes]]] = {}
         self._task_to_session: Dict[int, str] = {}
+
+        self._error_query_pending: Dict[int, threading.Event] = {}
+        self._error_query_results: Dict[int, Tuple[bool, str]] = {}
 
         self._version_req_id: Optional[int] = None
         self._version_event = threading.Event()
@@ -240,6 +244,28 @@ class ServerBridge:
             return True, waiter.task_id, 0
         return False, 0, waiter.err or errno.EIO
 
+    def query_error(self, err_code: int, timeout: float = 10.0) -> Tuple[bool, str]:
+        req_id = self._next_req_id()
+        event = threading.Event()
+        self._error_query_pending[req_id] = event
+
+        payload = struct.pack("<I", err_code & 0xFFFFFFFF)
+        try:
+            self._send_packet(8, req_id, 0, payload, require_ack=True)
+        except Exception:
+            self._error_query_pending.pop(req_id, None)
+            return False, ""
+
+        if not event.wait(timeout):
+            self._error_query_pending.pop(req_id, None)
+            return False, ""
+
+        result = self._error_query_results.pop(req_id, None)
+        self._error_query_pending.pop(req_id, None)
+        if result is not None:
+            return result
+        return False, ""
+
     def send_input(self, task_id: int, data: bytes) -> None:
         req_id = self._next_req_id()
         self._send_packet(5, req_id, task_id, data, require_ack=True)
@@ -355,26 +381,38 @@ class ServerBridge:
                             self._version_value = None
                         self._version_event.set()
 
-                    pending = self._pending.get(request_id)
-                    if pending is not None:
-                        if len(payload) == 8 and task_id != 0:
-                            pending.ok = True
-                            pending.task_id = task_id
-                            pending.event.set()
-                            self.register_task(pending.session_id, task_id)
-                        elif len(payload) >= 16:
-                            pending.ok = False
-                            pending.err = int(bytes_to_u64(payload[8:16]))
-                            pending.event.set()
-                        elif len(payload) == 0 and task_id != 0:
-                            pending.ok = True
-                            pending.task_id = task_id
-                            pending.event.set()
-                            self.register_task(pending.session_id, task_id)
-                        else:
-                            pending.ok = False
-                            pending.err = errno.EPROTO
-                            pending.event.set()
+                    elif request_id in self._error_query_pending:
+                        event_ = self._error_query_pending.get(request_id)
+                        if event_ is not None:
+                            if len(payload) >= 1:
+                                found = payload[0] != 0
+                                text = payload[1:].decode("utf-8", errors="replace") if len(payload) > 1 else ""
+                                self._error_query_results[request_id] = (found, text)
+                            else:
+                                self._error_query_results[request_id] = (False, "")
+                            event_.set()
+
+                    else:
+                        pending = self._pending.get(request_id)
+                        if pending is not None:
+                            if len(payload) == 8 and task_id != 0:
+                                pending.ok = True
+                                pending.task_id = task_id
+                                pending.event.set()
+                                self.register_task(pending.session_id, task_id)
+                            elif len(payload) >= 16:
+                                pending.ok = False
+                                pending.err = int(bytes_to_u64(payload[8:16]))
+                                pending.event.set()
+                            elif len(payload) == 0 and task_id != 0:
+                                pending.ok = True
+                                pending.task_id = task_id
+                                pending.event.set()
+                                self.register_task(pending.session_id, task_id)
+                            else:
+                                pending.ok = False
+                                pending.err = errno.EPROTO
+                                pending.event.set()
 
                 elif ptype == 6:
                     self._route_task_packet(task_id, "stdout", payload)

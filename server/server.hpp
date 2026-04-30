@@ -108,6 +108,8 @@ private:
         local_app_enqueued = true;
     }
 
+    void handle_query_error(uint64_t requestId, const std::vector<uint8_t>& payload, bool& local_app_enqueued);
+
     void handle_unknown(uint64_t requestId, uint64_t taskId, bool& local_app_enqueued) {
         queue_reply_errno(requestId, taskId, EINVAL);
         local_app_enqueued = true;
@@ -165,6 +167,9 @@ private:
                     break;
                 case 5:
                     handle_input_data(pkt.requestId, pkt.taskId, pkt.payload, local_app_enqueued);
+                    break;
+                case 8:
+                    handle_query_error(pkt.requestId, pkt.payload, local_app_enqueued);
                     break;
                 case 255:
                     handle_query_version(pkt.requestId, pkt.taskId, local_app_enqueued);
